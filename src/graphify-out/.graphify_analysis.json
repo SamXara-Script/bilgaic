@@ -1,0 +1,109 @@
+{
+  "communities": {
+    "0": [
+      "app",
+      "app_actionitems",
+      "app_activitylist",
+      "app_app",
+      "app_authscreen",
+      "app_cryptooptions",
+      "app_displaynamefromemail",
+      "app_icon",
+      "app_metric",
+      "app_navitems",
+      "app_overviewcard",
+      "app_overviewitems",
+      "app_pagemeta",
+      "app_purchasedtiers",
+      "app_sectionheader",
+      "app_tiercard",
+      "app_tiers",
+      "main"
+    ],
+    "1": [
+      "app_checkoutview",
+      "app_formatmoney",
+      "app_homeview",
+      "app_investview",
+      "app_profileview",
+      "app_walletview"
+    ],
+    "2": [
+      "components_button",
+      "components_button_actionicon",
+      "components_button_iconbutton",
+      "components_button_primarybutton",
+      "components_button_segmentbutton",
+      "components_button_tones"
+    ],
+    "3": [
+      "components_navbar",
+      "components_navbar_bottomnav",
+      "components_navbar_navicon",
+      "components_navbar_sidenav"
+    ]
+  },
+  "cohesion": {
+    "0": 0.1111111111111111,
+    "1": 0.3333333333333333,
+    "2": 0.3333333333333333,
+    "3": 0.5
+  },
+  "gods": [
+    {
+      "id": "app_formatmoney",
+      "label": "formatMoney()",
+      "degree": 6
+    },
+    {
+      "id": "app_homeview",
+      "label": "HomeView()",
+      "degree": 2
+    },
+    {
+      "id": "app_investview",
+      "label": "InvestView()",
+      "degree": 2
+    },
+    {
+      "id": "app_walletview",
+      "label": "WalletView()",
+      "degree": 2
+    },
+    {
+      "id": "app_profileview",
+      "label": "ProfileView()",
+      "degree": 2
+    },
+    {
+      "id": "app_checkoutview",
+      "label": "CheckoutView()",
+      "degree": 2
+    },
+    {
+      "id": "components_button_iconbutton",
+      "label": "IconButton()",
+      "degree": 2
+    },
+    {
+      "id": "components_button_primarybutton",
+      "label": "PrimaryButton()",
+      "degree": 2
+    },
+    {
+      "id": "components_button_segmentbutton",
+      "label": "SegmentButton()",
+      "degree": 2
+    },
+    {
+      "id": "components_navbar_bottomnav",
+      "label": "BottomNav()",
+      "degree": 2
+    }
+  ],
+  "surprises": [],
+  "tokens": {
+    "input": 0,
+    "output": 0
+  }
+}
