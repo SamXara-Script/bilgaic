@@ -1,0 +1,759 @@
+{
+  "directed": false,
+  "multigraph": false,
+  "graph": {},
+  "nodes": [
+    {
+      "label": "App.jsx",
+      "file_type": "code",
+      "source_file": "App.jsx",
+      "source_location": "L1",
+      "community": 0,
+      "norm_label": "app.jsx",
+      "id": "app"
+    },
+    {
+      "label": "navItems",
+      "file_type": "code",
+      "source_file": "App.jsx",
+      "source_location": "L6",
+      "community": 0,
+      "norm_label": "navitems",
+      "id": "app_navitems"
+    },
+    {
+      "label": "pageMeta",
+      "file_type": "code",
+      "source_file": "App.jsx",
+      "source_location": "L13",
+      "community": 0,
+      "norm_label": "pagemeta",
+      "id": "app_pagemeta"
+    },
+    {
+      "label": "actionItems",
+      "file_type": "code",
+      "source_file": "App.jsx",
+      "source_location": "L20",
+      "community": 0,
+      "norm_label": "actionitems",
+      "id": "app_actionitems"
+    },
+    {
+      "label": "cryptoOptions",
+      "file_type": "code",
+      "source_file": "App.jsx",
+      "source_location": "L27",
+      "community": 0,
+      "norm_label": "cryptooptions",
+      "id": "app_cryptooptions"
+    },
+    {
+      "label": "overviewItems",
+      "file_type": "code",
+      "source_file": "App.jsx",
+      "source_location": "L33",
+      "community": 0,
+      "norm_label": "overviewitems",
+      "id": "app_overviewitems"
+    },
+    {
+      "label": "tiers",
+      "file_type": "code",
+      "source_file": "App.jsx",
+      "source_location": "L39",
+      "community": 0,
+      "norm_label": "tiers",
+      "id": "app_tiers"
+    },
+    {
+      "label": "App()",
+      "file_type": "code",
+      "source_file": "App.jsx",
+      "source_location": "L46",
+      "community": 0,
+      "norm_label": "app()",
+      "id": "app_app"
+    },
+    {
+      "label": "AuthScreen()",
+      "file_type": "code",
+      "source_file": "App.jsx",
+      "source_location": "L145",
+      "community": 0,
+      "norm_label": "authscreen()",
+      "id": "app_authscreen"
+    },
+    {
+      "label": "HomeView()",
+      "file_type": "code",
+      "source_file": "App.jsx",
+      "source_location": "L169",
+      "community": 1,
+      "norm_label": "homeview()",
+      "id": "app_homeview"
+    },
+    {
+      "label": "InvestView()",
+      "file_type": "code",
+      "source_file": "App.jsx",
+      "source_location": "L210",
+      "community": 1,
+      "norm_label": "investview()",
+      "id": "app_investview"
+    },
+    {
+      "label": "WalletView()",
+      "file_type": "code",
+      "source_file": "App.jsx",
+      "source_location": "L237",
+      "community": 1,
+      "norm_label": "walletview()",
+      "id": "app_walletview"
+    },
+    {
+      "label": "ProfileView()",
+      "file_type": "code",
+      "source_file": "App.jsx",
+      "source_location": "L251",
+      "community": 1,
+      "norm_label": "profileview()",
+      "id": "app_profileview"
+    },
+    {
+      "label": "TierCard()",
+      "file_type": "code",
+      "source_file": "App.jsx",
+      "source_location": "L266",
+      "community": 0,
+      "norm_label": "tiercard()",
+      "id": "app_tiercard"
+    },
+    {
+      "label": "OverviewCard()",
+      "file_type": "code",
+      "source_file": "App.jsx",
+      "source_location": "L281",
+      "community": 0,
+      "norm_label": "overviewcard()",
+      "id": "app_overviewcard"
+    },
+    {
+      "label": "ActivityList()",
+      "file_type": "code",
+      "source_file": "App.jsx",
+      "source_location": "L285",
+      "community": 0,
+      "norm_label": "activitylist()",
+      "id": "app_activitylist"
+    },
+    {
+      "label": "PurchasedTiers()",
+      "file_type": "code",
+      "source_file": "App.jsx",
+      "source_location": "L290",
+      "community": 0,
+      "norm_label": "purchasedtiers()",
+      "id": "app_purchasedtiers"
+    },
+    {
+      "label": "CheckoutView()",
+      "file_type": "code",
+      "source_file": "App.jsx",
+      "source_location": "L295",
+      "community": 1,
+      "norm_label": "checkoutview()",
+      "id": "app_checkoutview"
+    },
+    {
+      "label": "SectionHeader()",
+      "file_type": "code",
+      "source_file": "App.jsx",
+      "source_location": "L306",
+      "community": 0,
+      "norm_label": "sectionheader()",
+      "id": "app_sectionheader"
+    },
+    {
+      "label": "Metric()",
+      "file_type": "code",
+      "source_file": "App.jsx",
+      "source_location": "L310",
+      "community": 0,
+      "norm_label": "metric()",
+      "id": "app_metric"
+    },
+    {
+      "label": "formatMoney()",
+      "file_type": "code",
+      "source_file": "App.jsx",
+      "source_location": "L314",
+      "community": 1,
+      "norm_label": "formatmoney()",
+      "id": "app_formatmoney"
+    },
+    {
+      "label": "displayNameFromEmail()",
+      "file_type": "code",
+      "source_file": "App.jsx",
+      "source_location": "L318",
+      "community": 0,
+      "norm_label": "displaynamefromemail()",
+      "id": "app_displaynamefromemail"
+    },
+    {
+      "label": "Icon()",
+      "file_type": "code",
+      "source_file": "App.jsx",
+      "source_location": "L323",
+      "community": 0,
+      "norm_label": "icon()",
+      "id": "app_icon"
+    },
+    {
+      "label": "button.jsx",
+      "file_type": "code",
+      "source_file": "components/button.jsx",
+      "source_location": "L1",
+      "community": 2,
+      "norm_label": "button.jsx",
+      "id": "components_button"
+    },
+    {
+      "label": "tones",
+      "file_type": "code",
+      "source_file": "components/button.jsx",
+      "source_location": "L1",
+      "community": 2,
+      "norm_label": "tones",
+      "id": "components_button_tones"
+    },
+    {
+      "label": "IconButton()",
+      "file_type": "code",
+      "source_file": "components/button.jsx",
+      "source_location": "L3",
+      "community": 2,
+      "norm_label": "iconbutton()",
+      "id": "components_button_iconbutton"
+    },
+    {
+      "label": "PrimaryButton()",
+      "file_type": "code",
+      "source_file": "components/button.jsx",
+      "source_location": "L7",
+      "community": 2,
+      "norm_label": "primarybutton()",
+      "id": "components_button_primarybutton"
+    },
+    {
+      "label": "SegmentButton()",
+      "file_type": "code",
+      "source_file": "components/button.jsx",
+      "source_location": "L11",
+      "community": 2,
+      "norm_label": "segmentbutton()",
+      "id": "components_button_segmentbutton"
+    },
+    {
+      "label": "ActionIcon()",
+      "file_type": "code",
+      "source_file": "components/button.jsx",
+      "source_location": "L15",
+      "community": 2,
+      "norm_label": "actionicon()",
+      "id": "components_button_actionicon"
+    },
+    {
+      "label": "navbar.jsx",
+      "file_type": "code",
+      "source_file": "components/navbar.jsx",
+      "source_location": "L1",
+      "community": 3,
+      "norm_label": "navbar.jsx",
+      "id": "components_navbar"
+    },
+    {
+      "label": "BottomNav()",
+      "file_type": "code",
+      "source_file": "components/navbar.jsx",
+      "source_location": "L1",
+      "community": 3,
+      "norm_label": "bottomnav()",
+      "id": "components_navbar_bottomnav"
+    },
+    {
+      "label": "SideNav()",
+      "file_type": "code",
+      "source_file": "components/navbar.jsx",
+      "source_location": "L5",
+      "community": 3,
+      "norm_label": "sidenav()",
+      "id": "components_navbar_sidenav"
+    },
+    {
+      "label": "NavIcon()",
+      "file_type": "code",
+      "source_file": "components/navbar.jsx",
+      "source_location": "L19",
+      "community": 3,
+      "norm_label": "navicon()",
+      "id": "components_navbar_navicon"
+    },
+    {
+      "label": "main.jsx",
+      "file_type": "code",
+      "source_file": "main.jsx",
+      "source_location": "L1",
+      "community": 0,
+      "norm_label": "main.jsx",
+      "id": "main"
+    }
+  ],
+  "links": [
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L20",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "app_actionitems"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L285",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "app_activitylist"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L46",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "app_app"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L145",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "app_authscreen"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L295",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "app_checkoutview"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L27",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "app_cryptooptions"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L318",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "app_displaynamefromemail"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L314",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "app_formatmoney"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L169",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "app_homeview"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L323",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "app_icon"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L210",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "app_investview"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L310",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "app_metric"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L6",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "app_navitems"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L281",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "app_overviewcard"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L33",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "app_overviewitems"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L13",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "app_pagemeta"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L251",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "app_profileview"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L290",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "app_purchasedtiers"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L306",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "app_sectionheader"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L266",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "app_tiercard"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L39",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "app_tiers"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L237",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "app_walletview"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L4",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "components_button"
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L4",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "components_button_iconbutton"
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L4",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "components_button_primarybutton"
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L4",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "components_button_segmentbutton"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L3",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "components_navbar"
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L3",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "components_navbar_bottomnav"
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L3",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app",
+      "target": "components_navbar_sidenav"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "main.jsx",
+      "source_location": "L4",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "main",
+      "target": "app"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L179",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app_homeview",
+      "target": "app_formatmoney"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L225",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app_investview",
+      "target": "app_formatmoney"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L241",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app_walletview",
+      "target": "app_formatmoney"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L255",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app_profileview",
+      "target": "app_formatmoney"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "App.jsx",
+      "source_location": "L300",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "app_checkoutview",
+      "target": "app_formatmoney"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "components/button.jsx",
+      "source_location": "L15",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "components_button",
+      "target": "components_button_actionicon"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "components/button.jsx",
+      "source_location": "L3",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "components_button",
+      "target": "components_button_iconbutton"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "components/button.jsx",
+      "source_location": "L7",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "components_button",
+      "target": "components_button_primarybutton"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "components/button.jsx",
+      "source_location": "L11",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "components_button",
+      "target": "components_button_segmentbutton"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "components/button.jsx",
+      "source_location": "L1",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "components_button",
+      "target": "components_button_tones"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "components/navbar.jsx",
+      "source_location": "L1",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "components_navbar",
+      "target": "components_navbar_bottomnav"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "components/navbar.jsx",
+      "source_location": "L19",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "components_navbar",
+      "target": "components_navbar_navicon"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "components/navbar.jsx",
+      "source_location": "L5",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "components_navbar",
+      "target": "components_navbar_sidenav"
+    }
+  ],
+  "hyperedges": []
+}
