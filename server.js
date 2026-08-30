@@ -181,10 +181,12 @@ const queries = {
     VALUES (?, ?, ?, ?, ?)
   `),
   listReferrals: db.prepare(`
-    SELECT id, name, email, created_at AS createdAt
-    FROM users
-    WHERE referred_by_user_id = ?
-    ORDER BY id DESC
+    SELECT invited.id, invited.name, invited.email, invited.created_at AS createdAt
+    FROM users AS invited
+    JOIN users AS owner ON owner.id = ?
+    WHERE invited.id <> owner.id
+      AND (invited.referred_by_user_id = owner.id OR invited.registration_invite_code = owner.invite_code)
+    ORDER BY invited.id DESC
   `),
   listWalletTransactions: db.prepare(`
     SELECT type, amount, crypto, network, address, memo, status, created_at AS createdAt

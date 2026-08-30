@@ -1078,7 +1078,11 @@ function toStaticAccountPayload(account, state) {
 }
 
 function getStaticReferrals(state, userId) {
-  return state.users.filter((account) => account.referredByUserId === userId).map((account) => ({
+  const owner = state.users.find((account) => account.id === userId)
+  const ownerInviteCode = normalizeStaticInviteCode(owner?.inviteCode)
+  return state.users.filter((account) => account.id !== userId && (
+    account.referredByUserId === userId || (ownerInviteCode && normalizeStaticInviteCode(account.registeredWithCode) === ownerInviteCode)
+  )).map((account) => ({
     id: account.id,
     name: account.name,
     email: account.email,
@@ -1101,6 +1105,7 @@ function normalizeStaticAccount(account, index, inviteCodes, walletIds) {
     ...account,
     id,
     inviteCode,
+    registeredWithCode: normalizeStaticInviteCode(account.registeredWithCode),
     verified: Boolean(account.verified),
     verification: account.verification || null,
     wallet: { id: walletId, balance: Number(storedWallet.balance ?? account.walletBalance) || 0 },
