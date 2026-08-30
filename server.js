@@ -12,6 +12,9 @@ const defaultInviteCode = 'SEZ2026'
 const configuredInviteCodes = process.env.INVITE_CODES
 const bootstrapInviteCodes = new Set(String(configuredInviteCodes || defaultInviteCode).split(',').map(normalizeInviteCodeValue).filter(Boolean))
 const hasConfiguredInviteCodes = Boolean(configuredInviteCodes)
+const projectedMonthlyRate = 0.24
+const maxJsonBodySize = 8 * 1024 * 1024
+const maxUploadBytes = 3 * 1024 * 1024
 
 const tierAmounts = [40, 90, 140, 200, 300, 500, 700, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000]
 const tierIds = ['starter', 'premium', 'elite', 'royal']
@@ -22,6 +25,9 @@ const tierCatalog = Object.fromEntries(tierAmounts.map((amount, index) => {
 
 const allowedCryptos = new Set(['USDT', 'BTC', 'ETH'])
 const allowedNetworks = new Set(['TRC20', 'ERC20', 'BEP20'])
+const allowedDocumentTypes = new Set(['id', 'passport'])
+const allowedDocumentMimes = new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/webp'])
+const allowedFaceMimes = new Set(['image/jpeg', 'image/png', 'image/webp'])
 const mimeTypes = {
   '.css': 'text/css; charset=utf-8',
   '.html': 'text/html; charset=utf-8',
@@ -83,6 +89,31 @@ db.exec(`
     status TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS daily_vip_earnings (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    purchase_id INTEGER NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
+    tier_id TEXT NOT NULL,
+    earning_date TEXT NOT NULL,
+    amount REAL NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(purchase_id, earning_date)
+  );
+
+  CREATE TABLE IF NOT EXISTS verification_submissions (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    document_type TEXT NOT NULL,
+    document_name TEXT NOT NULL,
+    document_mime TEXT NOT NULL,
+    document_data TEXT NOT NULL,
+    face_name TEXT NOT NULL,
+    face_mime TEXT NOT NULL,
+    face_data TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'Verified',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
 `)
 
 ensureColumn('users', 'verified', 'verified INTEGER NOT NULL DEFAULT 0')
@@ -118,6 +149,7 @@ const queries = {
   updateUserProfile: db.prepare('UPDATE users SET name = ?, email = ? WHERE id = ?'),
   updatePassword: db.prepare('UPDATE users SET password_salt = ?, password_hash = ? WHERE id = ?'),
   updateWalletBalance: db.prepare('UPDATE users SET wallet_balance = wallet_balance + ? WHERE id = ?'),
+  updateVerificationStatus: db.prepare('UPDATE users SET verified = ? WHERE id = ?'),
   createSession: db.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)'),
   deleteSession: db.prepare('DELETE FROM sessions WHERE token = ?'),
   deleteOtherSessions: db.prepare('DELETE FROM sessions WHERE user_id = ? AND token <> ?'),
@@ -128,14 +160,25 @@ const queries = {
     WHERE sessions.token = ? AND sessions.expires_at > ?
   `),
   listPurchases: db.prepare(`
-    SELECT tier_id AS tierId, tier_level AS level, tier_title AS title, amount, crypto, created_at AS createdAt
+    SELECT id AS purchaseId, tier_id AS tierId, tier_level AS level, tier_title AS title, amount, crypto, created_at AS createdAt
     FROM purchases
     WHERE user_id = ?
     ORDER BY id DESC
   `),
+  listAccruablePurchases: db.prepare(`
+    SELECT id AS purchaseId, tier_id AS tierId, tier_level AS level, tier_title AS title, amount, crypto, created_at AS createdAt
+    FROM purchases
+    WHERE user_id = ?
+    ORDER BY id
+  `),
   createPurchase: db.prepare(`
     INSERT INTO purchases (user_id, tier_id, tier_level, tier_title, amount, crypto)
     VALUES (?, ?, ?, ?, ?, ?)
+  `),
+  findLastDailyVipEarning: db.prepare('SELECT MAX(earning_date) AS earningDate FROM daily_vip_earnings WHERE purchase_id = ?'),
+  createDailyVipEarning: db.prepare(`
+    INSERT OR IGNORE INTO daily_vip_earnings (user_id, purchase_id, tier_id, earning_date, amount)
+    VALUES (?, ?, ?, ?, ?)
   `),
   listReferrals: db.prepare(`
     SELECT id, name, email, created_at AS createdAt
@@ -153,6 +196,17 @@ const queries = {
   createWalletTransaction: db.prepare(`
     INSERT INTO wallet_transactions (user_id, type, amount, crypto, network, address, memo, status)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `),
+  findLatestVerification: db.prepare(`
+    SELECT document_type AS documentType, document_name AS documentName, face_name AS faceName, status, created_at AS createdAt
+    FROM verification_submissions
+    WHERE user_id = ?
+    ORDER BY id DESC
+    LIMIT 1
+  `),
+  createVerificationSubmission: db.prepare(`
+    INSERT INTO verification_submissions (user_id, document_type, document_name, document_mime, document_data, face_name, face_mime, face_data, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
 }
 
@@ -188,7 +242,7 @@ async function handleApi(request, response, url) {
     if (queries.findUserByEmail.get(email)) throw httpError(409, 'An account already uses this email address.')
 
     const { salt, hash } = hashPassword(password)
-    const result = queries.createUser.run(name, email, salt, hash, 1, createInviteCode(), invitation.inviteCode, invitation.inviterId, createWalletId(), 0)
+    const result = queries.createUser.run(name, email, salt, hash, 0, createInviteCode(), invitation.inviteCode, invitation.inviterId, createWalletId(), 0)
     const user = queries.findUserById.get(Number(result.lastInsertRowid))
     const token = createSession(user.id)
     sendAccountPayload(response, 201, user, { 'Set-Cookie': sessionCookie(token) })
@@ -257,6 +311,32 @@ async function handleApi(request, response, url) {
     if (token) queries.deleteOtherSessions.run(user.id, token)
 
     sendJson(response, 200, { ok: true })
+    return
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/verification') {
+    const body = await readBody(request)
+    const documentType = requireVerificationDocumentType(body.documentType)
+    const documentFile = requireUpload(body.document, 'ID or passport document', allowedDocumentMimes)
+    const faceFile = requireUpload(body.face, 'Face photo', allowedFaceMimes)
+
+    runInTransaction(() => {
+      queries.createVerificationSubmission.run(
+        user.id,
+        documentType,
+        documentFile.name,
+        documentFile.mime,
+        documentFile.data,
+        faceFile.name,
+        faceFile.mime,
+        faceFile.data,
+        'Verified',
+      )
+      queries.updateVerificationStatus.run(1, user.id)
+    })
+
+    const record = queries.findUserById.get(user.id)
+    sendJson(response, 201, { user: toPublicUser(record), verification: toPublicVerification(queries.findLatestVerification.get(user.id)) })
     return
   }
 
@@ -347,11 +427,12 @@ function requireUser(request) {
   const token = readCookies(request).sez_session
   const user = token ? queries.findSessionUser.get(token, Date.now()) : null
   if (!user) throw httpError(401, 'Please log in to continue.')
-  return user
+  syncVipEarnings(user.id)
+  return queries.findSessionUser.get(token, Date.now()) || user
 }
 
 function requireVerifiedUser(user) {
-  if (!user.verified) throw httpError(403, 'Your account must be verified before you can add money or buy a tier.')
+  if (!user.verified) throw httpError(403, 'Upload your ID or passport and face photo to verify your account.')
 }
 
 function createSession(userId) {
@@ -400,6 +481,12 @@ function requireAmount(value) {
   return amount
 }
 
+function requireVerificationDocumentType(value) {
+  const documentType = String(value || '').trim().toLowerCase()
+  if (!allowedDocumentTypes.has(documentType)) throw httpError(400, 'Choose ID card or passport for verification.')
+  return documentType
+}
+
 function requireText(value, label, minLength, maxLength) {
   const text = String(value || '').trim()
   if (text.length < minLength || text.length > maxLength) throw httpError(400, `${label} must be between ${minLength} and ${maxLength} characters.`)
@@ -412,11 +499,101 @@ function requirePassword(value) {
   return password
 }
 
+function requireUpload(value, label, allowedMimes) {
+  if (!value || typeof value !== 'object') throw httpError(400, `${label} is required.`)
+
+  const name = requireText(value.name, `${label} file name`, 1, 180)
+  const mime = String(value.type || '').trim().toLowerCase()
+  const data = String(value.data || '')
+  const dataPrefix = `data:${mime};base64,`
+  const base64 = data.startsWith(dataPrefix) ? data.slice(dataPrefix.length) : ''
+  const allowedDescription = allowedMimes.has('application/pdf') ? 'PDF, JPG, PNG, or WEBP' : 'JPG, PNG, or WEBP'
+
+  if (!allowedMimes.has(mime)) throw httpError(400, `${label} must be a ${allowedDescription} file.`)
+  if (!base64 || base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(base64)) throw httpError(400, `${label} upload is not valid.`)
+
+  const bytes = Buffer.from(base64, 'base64')
+  if (!bytes.length) throw httpError(400, `${label} upload is empty.`)
+  if (bytes.length > maxUploadBytes) throw httpError(413, `${label} must be 3 MB or smaller.`)
+
+  return { name, mime, data }
+}
+
+function syncVipEarnings(userId) {
+  const purchases = queries.listAccruablePurchases.all(userId)
+  if (!purchases.length) return queries.findUserById.get(userId)
+
+  runInTransaction(() => {
+    for (const purchase of purchases) {
+      const lastEarning = queries.findLastDailyVipEarning.get(purchase.purchaseId)
+      const earningDates = getMissingDailyEarningDates(purchase.createdAt, lastEarning?.earningDate)
+      if (!earningDates.length) continue
+
+      const dailyAmount = calculateDailyVipIncome(purchase.amount)
+      for (const earningDate of earningDates) {
+        const result = queries.createDailyVipEarning.run(userId, purchase.purchaseId, purchase.tierId, earningDate, dailyAmount)
+        if (!result.changes) continue
+
+        queries.updateWalletBalance.run(dailyAmount, userId)
+        queries.createWalletTransaction.run(userId, 'earning', dailyAmount, purchase.crypto, null, null, `${purchase.level} daily income ${earningDate}`, 'Credited')
+      }
+    }
+  })
+
+  return queries.findUserById.get(userId)
+}
+
+function getMissingDailyEarningDates(purchaseCreatedAt, lastEarningDate) {
+  const today = startOfUtcDay(new Date())
+  const lastDate = lastEarningDate ? parseUtcDate(lastEarningDate) : null
+  const purchaseDate = parseUtcDate(purchaseCreatedAt)
+  let currentDate = addUtcDays(startOfUtcDay(lastDate || purchaseDate), 1)
+  const dates = []
+
+  while (currentDate <= today) {
+    dates.push(toUtcDateKey(currentDate))
+    currentDate = addUtcDays(currentDate, 1)
+  }
+
+  return dates
+}
+
+function calculateDailyVipIncome(amount) {
+  return roundMoney((Number(amount) || 0) * projectedMonthlyRate / 30)
+}
+
+function roundMoney(amount) {
+  return Math.round((amount + Number.EPSILON) * 100) / 100
+}
+
+function parseUtcDate(value) {
+  if (!value) return new Date()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(value))) return new Date(`${value}T00:00:00.000Z`)
+
+  const normalized = String(value).includes('T') ? String(value) : String(value).replace(' ', 'T')
+  const date = new Date(normalized.endsWith('Z') ? normalized : `${normalized}Z`)
+  return Number.isNaN(date.getTime()) ? new Date() : date
+}
+
+function startOfUtcDay(date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
+}
+
+function addUtcDays(date, days) {
+  const nextDate = new Date(date)
+  nextDate.setUTCDate(nextDate.getUTCDate() + days)
+  return nextDate
+}
+
+function toUtcDateKey(date) {
+  return date.toISOString().slice(0, 10)
+}
+
 async function readBody(request) {
   let body = ''
   for await (const chunk of request) {
     body += chunk
-    if (body.length > 100_000) throw httpError(413, 'Request is too large.')
+    if (body.length > maxJsonBodySize) throw httpError(413, 'Request is too large.')
   }
   try {
     return body ? JSON.parse(body) : {}
@@ -460,13 +637,26 @@ function toPublicWalletTransaction(record) {
   }
 }
 
+function toPublicVerification(record) {
+  if (!record) return null
+  return {
+    documentType: record.documentType,
+    documentName: record.documentName,
+    faceName: record.faceName,
+    status: record.status,
+    createdAt: record.createdAt,
+  }
+}
+
 function sendAccountPayload(response, status, record, extraHeaders = {}) {
+  const syncedRecord = syncVipEarnings(record.id) || record
   sendJson(response, status, {
-    user: toPublicUser(record),
-    wallet: toPublicWallet(record),
-    purchases: queries.listPurchases.all(record.id),
-    transactions: queries.listWalletTransactions.all(record.id).map(toPublicWalletTransaction),
-    referrals: queries.listReferrals.all(record.id).map(toPublicReferral),
+    user: toPublicUser(syncedRecord),
+    wallet: toPublicWallet(syncedRecord),
+    purchases: queries.listPurchases.all(syncedRecord.id),
+    transactions: queries.listWalletTransactions.all(syncedRecord.id).map(toPublicWalletTransaction),
+    referrals: queries.listReferrals.all(syncedRecord.id).map(toPublicReferral),
+    verification: toPublicVerification(queries.findLatestVerification.get(syncedRecord.id)),
   }, extraHeaders)
 }
 

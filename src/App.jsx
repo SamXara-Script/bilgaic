@@ -21,6 +21,7 @@ const pageMeta = {
   withdraw: { eyebrow: 'Account funds', title: 'Withdraw' },
   security: { eyebrow: 'Account protection', title: 'Security' },
   profileSettings: { eyebrow: 'Account management', title: 'Profile settings' },
+  verification: { eyebrow: 'Customer verification', title: 'Verify account' },
 }
 
 const actionItems = [
@@ -73,7 +74,10 @@ const tierFilters = [
 const staticAuthStorageKey = 'sez-demo-auth'
 const defaultInviteCode = 'SEZ2026'
 const emptyWallet = { id: '', balance: 0 }
-const verificationRequiredMessage = 'Your account must be verified before you can add money or buy a tier.'
+const verificationRequiredMessage = 'Upload your ID or passport and face photo to verify your account.'
+const uploadMaxBytes = 3 * 1024 * 1024
+const documentUploadTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
+const faceUploadTypes = ['image/jpeg', 'image/png', 'image/webp']
 
 function App() {
   const [activeView, setActiveView] = useState('home')
@@ -85,6 +89,7 @@ function App() {
   const [wallet, setWallet] = useState(emptyWallet)
   const [transactions, setTransactions] = useState([])
   const [referrals, setReferrals] = useState([])
+  const [verification, setVerification] = useState(null)
   const [user, setUser] = useState(null)
   const [authMode, setAuthMode] = useState('login')
   const [authReady, setAuthReady] = useState(false)
@@ -101,6 +106,7 @@ function App() {
         setPurchases(session.purchases.map(toClientPurchase))
         setTransactions((session.transactions || []).map(toClientTransaction))
         setReferrals(session.referrals || [])
+        setVerification(session.verification || null)
       } catch {
         // The login screen remains available while the API is offline.
       } finally {
@@ -161,6 +167,7 @@ function App() {
   function requireVerifiedAccount() {
     if (user?.verified) return true
     showNotice(verificationRequiredMessage)
+    setActiveView('verification')
     return false
   }
 
@@ -200,6 +207,14 @@ function App() {
   async function updatePassword({ currentPassword, newPassword }) {
     await requestApi('/api/security/password', { method: 'POST', body: { currentPassword, newPassword } })
     showNotice('Password updated.')
+  }
+
+  async function submitVerification({ documentType, document, face }) {
+    const result = await requestApi('/api/verification', { method: 'POST', body: { documentType, document, face } })
+    setUser(result.user)
+    setVerification(result.verification || null)
+    setActiveView('profile')
+    showNotice('Account verified. You can now add balance and buy VIP tiers.')
   }
 
   async function submitRecharge({ amount, crypto, network }) {
@@ -242,8 +257,10 @@ function App() {
     setPurchases(result.purchases.map(toClientPurchase))
     setTransactions((result.transactions || []).map(toClientTransaction))
     setReferrals(result.referrals || [])
-    setActiveView('home')
+    setVerification(result.verification || null)
+    setActiveView(result.user?.verified ? 'home' : 'verification')
     setCheckoutTier(null)
+    if (!result.user?.verified) showNotice(verificationRequiredMessage)
   }
 
   async function logout() {
@@ -257,6 +274,7 @@ function App() {
     setWallet(emptyWallet)
     setTransactions([])
     setReferrals([])
+    setVerification(null)
     setCheckoutTier(null)
     setActiveView('home')
     setAuthMode('login')
@@ -269,7 +287,7 @@ function App() {
     return <AuthScreen mode={authMode} onModeChange={setAuthMode} onAuthenticate={authenticate} />
   }
 
-  const currentPage = checkoutTier ? { eyebrow: 'Customer checkout', title: 'Crypto payment' } : pageMeta[activeView]
+  const currentPage = checkoutTier ? { eyebrow: 'Customer checkout', title: 'Crypto payment' } : pageMeta[activeView] || pageMeta.home
 
   return (
     <main className="app-shell">
@@ -281,15 +299,16 @@ function App() {
         </header>
         <div className="page-content">
           {checkoutTier ? <CheckoutView tier={checkoutTier} crypto={selectedCrypto} wallet={wallet} onCrypto={setSelectedCrypto} onBack={() => setCheckoutTier(null)} onConfirm={confirmPurchase} /> : <>
-            {activeView === 'home' && <HomeView onAction={showNotice} onNavigate={navigateTo} onHistory={() => setActiveView('wallet')} portfolio={portfolio} activities={activities} user={user} onLogout={logout} />}
+            {activeView === 'home' && <HomeView onAction={showNotice} onNavigate={navigateTo} onVerify={() => setActiveView('verification')} onHistory={() => setActiveView('wallet')} portfolio={portfolio} activities={activities} user={user} onLogout={logout} />}
             {activeView === 'invest' && <InvestView filter={tierFilter} onFilter={setTierFilter} tiers={filteredTiers} portfolio={portfolio} purchases={purchases} onInvest={startCheckout} onProfile={() => setActiveView('profile')} onSupport={showNotice} />}
             {activeView === 'wallet' && <WalletView onAction={showNotice} onRecharge={() => navigateTo('recharge')} onWithdraw={() => navigateTo('withdraw')} portfolio={portfolio} activities={activities} />}
             {activeView === 'referrals' && <ReferralView user={user} referrals={referrals} onCopy={copyInviteCode} onRefresh={refreshReferrals} />}
-            {activeView === 'profile' && <ProfileView onAction={showNotice} onProfileSettings={() => navigateTo('profileSettings')} onSecurity={() => navigateTo('security')} onReferrals={() => navigateTo('referrals')} portfolio={portfolio} purchases={purchases} user={user} onLogout={logout} />}
+            {activeView === 'profile' && <ProfileView onAction={showNotice} onProfileSettings={() => navigateTo('profileSettings')} onSecurity={() => navigateTo('security')} onReferrals={() => navigateTo('referrals')} onVerification={() => navigateTo('verification')} portfolio={portfolio} purchases={purchases} user={user} verification={verification} onLogout={logout} />}
             {activeView === 'recharge' && <RechargeView wallet={wallet} onBack={() => setActiveView('wallet')} onRecharge={submitRecharge} />}
             {activeView === 'withdraw' && <WithdrawView onBack={() => setActiveView('wallet')} onWithdraw={submitWithdrawal} portfolio={portfolio} />}
             {activeView === 'profileSettings' && <ProfileSettingsView user={user} onBack={() => setActiveView('profile')} onSave={updateProfile} />}
-            {activeView === 'security' && <SecurityView user={user} onBack={() => setActiveView('profile')} onAction={showNotice} onPasswordChange={updatePassword} />}
+            {activeView === 'security' && <SecurityView user={user} onBack={() => setActiveView('profile')} onAction={showNotice} onPasswordChange={updatePassword} onVerification={() => navigateTo('verification')} />}
+            {activeView === 'verification' && <VerificationView user={user} verification={verification} onBack={() => setActiveView('profile')} onVerify={submitVerification} />}
           </>}
         </div>
       </div>
@@ -337,11 +356,16 @@ function AuthScreen({ mode, onModeChange, onAuthenticate }) {
   </main>
 }
 
-function HomeView({ onAction, onNavigate, onHistory, portfolio, activities, user, onLogout }) {
+function VerificationBanner({ onVerify }) {
+  return <section className="verification-banner"><div><p className="eyebrow">Unverified account</p><h2>Upload your ID or passport and face photo.</h2></div><button type="button" onClick={onVerify}><Icon name="upload" />Verify</button></section>
+}
+
+function HomeView({ onAction, onNavigate, onVerify, onHistory, portfolio, activities, user, onLogout }) {
   const overviewItems = getOverviewItems(portfolio)
 
   return (
     <>
+      {!user.verified && <VerificationBanner onVerify={onVerify} />}
       <div className="home-hero-grid">
         <section className="balance-card">
           <div className="balance-topline">
@@ -415,13 +439,18 @@ function WalletView({ onAction, onRecharge, onWithdraw, portfolio, activities })
   )
 }
 
-function ProfileView({ onAction, onProfileSettings, onSecurity, onReferrals, portfolio, purchases, user, onLogout }) {
+function ProfileView({ onAction, onProfileSettings, onSecurity, onReferrals, onVerification, portfolio, purchases, user, verification, onLogout }) {
+  const verificationLabel = user.verified ? 'Verified' : 'Unverified'
+  const verificationDate = verification?.createdAt ? `Verified ${formatShortDate(verification.createdAt)}` : 'ID/passport and face photo required'
+
   return (
     <>
-      <section className="profile-hero"><div className="large-avatar">{user.name.slice(0, 1).toUpperCase()}</div><div><p className="eyebrow">Member Account</p><h1>{user.name}</h1><p>{user.email}</p><span className={`verification-pill${user.verified ? ' verified' : ''}`}>{user.verified ? 'Verified' : 'Verification required'}</span></div></section>
+      <section className="profile-hero"><div className="large-avatar">{user.name.slice(0, 1).toUpperCase()}</div><div><p className="eyebrow">Member Account</p><h1>{user.name}</h1><p>{user.email}</p><span className={`verification-pill${user.verified ? ' verified' : ''}`}>{verificationLabel}</span></div></section>
       <section className="profile-grid"><Metric label="Wallet" value={formatMoney(portfolio.walletBalance)} /><Metric label="Active Tiers" value={String(portfolio.activeTiers)} /><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label="1 Month Result" value={formatMoney(portfolio.oneMonthResult)} /></section>
+      {!user.verified && <VerificationBanner onVerify={onVerification} />}
       <section className="purchased-panel"><SectionHeader title="Purchased Tiers" action={`${portfolio.activeTiers} active`} onAction={() => onAction('Your purchased tiers are shown below.')} /><PurchasedTiers purchases={purchases} /></section>
       <section className="settings-list">
+        <button type="button" onClick={onVerification}><span><Icon name="upload" />Verification</span><small>{verificationDate}</small><Icon name="chevron" /></button>
         <button type="button" onClick={onProfileSettings}><span><Icon name="user" />Profile settings</span><Icon name="chevron" /></button>
         <button type="button" onClick={onReferrals}><span><Icon name="send" />Referrals</span><Icon name="chevron" /></button>
         <button type="button" onClick={onSecurity}><span><Icon name="shield" />Security</span><Icon name="chevron" /></button>
@@ -493,7 +522,7 @@ function OverviewCard({ item }) {
 
 function ActivityList({ items, emptyMessage }) {
   if (!items.length) return <section className="empty-state"><Icon name="wallet" /><p>{emptyMessage}</p></section>
-  return <section className="activity-list">{items.map((item) => <article className="activity-row" key={item.title}><div className={`activity-icon ${item.tone}`}><Icon name={item.type} /></div><div className="activity-copy"><h3>{item.title}</h3><p>{item.time}</p></div><strong className={item.amount.startsWith('+') ? 'positive' : 'negative'}>{item.amount}</strong></article>)}</section>
+  return <section className="activity-list">{items.map((item, index) => <article className="activity-row" key={`${item.title}-${item.time}-${index}`}><div className={`activity-icon ${item.tone}`}><Icon name={item.type} /></div><div className="activity-copy"><h3>{item.title}</h3><p>{item.time}</p></div><strong className={item.amount.startsWith('+') ? 'positive' : 'negative'}>{item.amount}</strong></article>)}</section>
 }
 
 function PurchasedTiers({ purchases }) {
@@ -634,7 +663,7 @@ function ProfileSettingsView({ user, onBack, onSave }) {
   </section>
 }
 
-function SecurityView({ user, onBack, onAction, onPasswordChange }) {
+function SecurityView({ user, onBack, onAction, onPasswordChange, onVerification }) {
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false)
@@ -670,9 +699,53 @@ function SecurityView({ user, onBack, onAction, onPasswordChange }) {
       <section className="info-panel security-panel">
         <p className="eyebrow">Account protection</p>
         <h2>{user.email}</h2>
-        <button className={`toggle-row${user.verified ? ' active' : ''}`} type="button" onClick={() => onAction(user.verified ? 'Your account is verified for recharge and tier purchases.' : verificationRequiredMessage)}><span><Icon name="check" />Customer verification</span><strong>{user.verified ? 'Verified' : 'Required'}</strong></button>
+        <button className={`toggle-row${user.verified ? ' active' : ''}`} type="button" onClick={() => user.verified ? onAction('Your account is verified for recharge and tier purchases.') : onVerification()}><span><Icon name={user.verified ? 'check' : 'upload'} />Customer verification</span><strong>{user.verified ? 'Verified' : 'Unverified'}</strong></button>
         <button className={`toggle-row${twoFactorEnabled ? ' active' : ''}`} type="button" onClick={() => setTwoFactorEnabled((enabled) => !enabled)}><span><Icon name="shield" />Two-factor login</span><strong>{twoFactorEnabled ? 'On' : 'Off'}</strong></button>
         <button className="toggle-row" type="button" onClick={() => onAction('Withdrawal confirmation is required for every request.')}><span><Icon name="check" />Withdrawal confirmation</span><strong>On</strong></button>
+      </section>
+    </div>
+  </section>
+}
+
+function VerificationView({ user, verification, onBack, onVerify }) {
+  const [documentType, setDocumentType] = useState('id')
+  const [documentFile, setDocumentFile] = useState(null)
+  const [faceFile, setFaceFile] = useState(null)
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  async function submit(event) {
+    event.preventDefault()
+    setError('')
+    setSubmitting(true)
+    try {
+      const document = await fileToUpload(documentFile, 'ID or passport document', documentUploadTypes)
+      const face = await fileToUpload(faceFile, 'Face photo', faceUploadTypes)
+      await onVerify({ documentType, document, face })
+    } catch (verificationError) {
+      setError(verificationError.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return <section className="detail-page">
+    <button className="subpage-back" type="button" onClick={onBack}><Icon name="arrow-left" />Back to profile</button>
+    <div className="detail-grid">
+      <form className="form-panel verification-form" onSubmit={submit}>
+        <p className="eyebrow">Customer verification</p>
+        <h1>{user.verified ? 'Verified account' : 'Upload documents'}</h1>
+        <label>Document type<select value={documentType} onChange={(event) => setDocumentType(event.target.value)} disabled={user.verified}><option value="id">ID card</option><option value="passport">Passport</option></select></label>
+        <label>ID or passport<input type="file" accept=".pdf,image/jpeg,image/png,image/webp" onChange={(event) => setDocumentFile(event.target.files?.[0] || null)} disabled={user.verified} required={!user.verified} /></label>
+        <label>Face photo<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setFaceFile(event.target.files?.[0] || null)} disabled={user.verified} required={!user.verified} /></label>
+        {error && <p className="auth-error" role="alert">{error}</p>}
+        <button className="primary-button" type="submit" disabled={submitting || user.verified}>{submitting ? 'Uploading...' : user.verified ? 'Already Verified' : 'Submit Verification'}</button>
+      </form>
+      <section className="info-panel verification-panel">
+        <p className="eyebrow">Verification status</p>
+        <h2>{user.verified ? 'Verified' : 'Unverified'}</h2>
+        <div className={`verification-status${user.verified ? ' verified' : ''}`}><Icon name={user.verified ? 'check' : 'upload'} /><span>{user.verified ? 'Your wallet is enabled for recharge, withdrawals, and VIP purchases.' : 'Upload one ID or passport document and one face picture to unlock wallet actions.'}</span></div>
+        <div className="result-strip"><Metric label="Document" value={verification?.documentName || 'Required'} /><Metric label="Face Photo" value={verification?.faceName || 'Required'} /></div>
       </section>
     </div>
   </section>
@@ -725,8 +798,8 @@ function toClientTransaction(transaction) {
 }
 
 function toActivity(transaction) {
-  const isCredit = transaction.type === 'recharge'
-  const title = transaction.memo || (isCredit ? 'Wallet recharge' : transaction.type === 'purchase' ? 'Tier purchase' : 'Wallet withdrawal')
+  const isCredit = transaction.type === 'recharge' || transaction.type === 'earning'
+  const title = transaction.memo || (transaction.type === 'earning' ? 'VIP daily income' : isCredit ? 'Wallet recharge' : transaction.type === 'purchase' ? 'Tier purchase' : 'Wallet withdrawal')
   const details = [transaction.status, transaction.crypto, transaction.network].filter(Boolean).join(' - ')
   return {
     title,
@@ -739,6 +812,7 @@ function toActivity(transaction) {
 
 function getTransactionTone(type) {
   if (type === 'recharge') return 'teal'
+  if (type === 'earning') return 'gold'
   if (type === 'withdrawal') return 'violet'
   return 'blue'
 }
@@ -748,6 +822,34 @@ function formatShortDate(value) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return 'New'
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function fileToUpload(file, label, allowedTypes) {
+  if (!file) throw new Error(`${label} is required.`)
+  const mime = file.type || inferMimeFromName(file.name)
+  const allowedDescription = allowedTypes.includes('application/pdf') ? 'PDF, JPG, PNG, or WEBP' : 'JPG, PNG, or WEBP'
+
+  if (!allowedTypes.includes(mime)) throw new Error(`${label} must be a ${allowedDescription} file.`)
+  if (file.size > uploadMaxBytes) throw new Error(`${label} must be 3 MB or smaller.`)
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.addEventListener('load', () => {
+      const data = String(reader.result || '').replace(/^data:;base64,/, `data:${mime};base64,`)
+      resolve({ name: file.name, type: mime, data })
+    })
+    reader.addEventListener('error', () => reject(new Error(`${label} could not be read.`)))
+    reader.readAsDataURL(file)
+  })
+}
+
+function inferMimeFromName(name) {
+  const extension = String(name || '').split('.').pop()?.toLowerCase()
+  if (extension === 'pdf') return 'application/pdf'
+  if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg'
+  if (extension === 'png') return 'image/png'
+  if (extension === 'webp') return 'image/webp'
+  return ''
 }
 
 async function requestApi(path, options = {}) {
@@ -794,13 +896,15 @@ function handleStaticApi(path, options = {}) {
       name,
       email,
       password,
-      verified: true,
+      verified: false,
+      verification: null,
       inviteCode: createStaticInviteCode(state.nextUserId, new Set(state.users.map((item) => item.inviteCode))),
       registeredWithCode: invitation.inviteCode,
       referredByUserId: invitation.inviterId,
       wallet: { id: createStaticWalletId(state.nextUserId, new Set(state.users.map((item) => item.wallet.id))), balance: 0 },
       purchases: [],
       transactions: [],
+      dailyEarnings: [],
     }
     state.nextUserId += 1
     state.sessionEmail = email
@@ -856,6 +960,23 @@ function handleStaticApi(path, options = {}) {
     return { ok: true }
   }
 
+  if (method === 'POST' && path === '/api/verification') {
+    const documentType = requireStaticVerificationDocumentType(body.documentType)
+    const documentFile = requireStaticUpload(body.document, 'ID or passport document', documentUploadTypes)
+    const faceFile = requireStaticUpload(body.face, 'Face photo', faceUploadTypes)
+
+    account.verified = true
+    account.verification = {
+      documentType,
+      documentName: documentFile.name,
+      faceName: faceFile.name,
+      status: 'Verified',
+      createdAt: new Date().toISOString(),
+    }
+    writeStaticAuthState(state)
+    return { user: toPublicUser(account), verification: account.verification }
+  }
+
   if (method === 'POST' && path === '/api/purchases') {
     requireStaticVerifiedAccount(account)
     const tier = tiers.find((item) => item.id === body.tierId)
@@ -865,7 +986,7 @@ function handleStaticApi(path, options = {}) {
     if ((account.purchases || []).some((purchase) => purchase.tierId === tier.id)) throw new Error('This tier is already in your profile.')
     if (account.wallet.balance < tier.price) throw new Error('Recharge your wallet before buying this tier.')
 
-    const purchase = { tierId: tier.id, level: tier.level, title: tier.title, amount: tier.price, crypto }
+    const purchase = { tierId: tier.id, level: tier.level, title: tier.title, amount: tier.price, crypto, createdAt: new Date().toISOString() }
     account.purchases = [purchase, ...(account.purchases || [])]
     account.wallet.balance -= tier.price
     account.transactions = [createStaticTransaction('purchase', tier.price, crypto, null, null, `${tier.level} ${tier.title}`, 'Completed'), ...(account.transactions || [])]
@@ -913,7 +1034,13 @@ function readStaticAuthState() {
     const walletIds = new Set()
     const users = (Array.isArray(storedState.users) ? storedState.users : []).map((account, index) => normalizeStaticAccount(account, index, inviteCodes, walletIds))
     const nextUserId = Number(storedState.nextUserId) || users.reduce((maxId, account) => Math.max(maxId, Number(account.id) || 0), 0) + 1
-    return { users, nextUserId, sessionEmail: storedState.sessionEmail || null }
+    const state = { users, nextUserId, sessionEmail: storedState.sessionEmail || null }
+    let hasVipChanges = false
+    for (const account of users) {
+      if (syncStaticVipEarnings(account)) hasVipChanges = true
+    }
+    if (hasVipChanges) window.localStorage.setItem(staticAuthStorageKey, JSON.stringify(state))
+    return state
   } catch {
     throw new Error('This browser cannot save demo accounts.')
   }
@@ -946,6 +1073,7 @@ function toStaticAccountPayload(account, state) {
     purchases: account.purchases || [],
     transactions: account.transactions || [],
     referrals: getStaticReferrals(state, account.id),
+    verification: account.verification || null,
   }
 }
 
@@ -973,12 +1101,19 @@ function normalizeStaticAccount(account, index, inviteCodes, walletIds) {
     ...account,
     id,
     inviteCode,
+    verified: Boolean(account.verified),
+    verification: account.verification || null,
     wallet: { id: walletId, balance: Number(storedWallet.balance ?? account.walletBalance) || 0 },
-    purchases: Array.isArray(account.purchases) ? account.purchases : [],
+    purchases: Array.isArray(account.purchases) ? account.purchases.map(normalizeStaticPurchase) : [],
     transactions: Array.isArray(account.transactions) ? account.transactions : [],
+    dailyEarnings: Array.isArray(account.dailyEarnings) ? account.dailyEarnings : [],
     referredByUserId: Number(account.referredByUserId) || null,
     createdAt: account.createdAt || new Date().toISOString(),
   }
+}
+
+function normalizeStaticPurchase(purchase) {
+  return { ...purchase, createdAt: purchase.createdAt || new Date().toISOString() }
 }
 
 function normalizeStaticEmail(value) {
@@ -1016,12 +1151,103 @@ function createStaticWalletId(seed, existingIds) {
   throw new Error('Unable to create a unique wallet.')
 }
 
-function createStaticTransaction(type, amount, crypto, network, address, memo, status) {
-  return { type, amount, crypto, network, address, memo, status, createdAt: new Date().toISOString() }
+function createStaticTransaction(type, amount, crypto, network, address, memo, status, createdAt = new Date().toISOString()) {
+  return { type, amount, crypto, network, address, memo, status, createdAt }
 }
 
 function normalizeStaticWalletId(value) {
   return String(value || '').trim().toUpperCase().replace(/\s+/g, '')
+}
+
+function requireStaticVerificationDocumentType(value) {
+  const documentType = String(value || '').trim().toLowerCase()
+  if (!['id', 'passport'].includes(documentType)) throw new Error('Choose ID card or passport for verification.')
+  return documentType
+}
+
+function requireStaticUpload(value, label, allowedTypes) {
+  if (!value || typeof value !== 'object') throw new Error(`${label} is required.`)
+  const name = requireStaticText(value.name, `${label} file name`, 1, 180)
+  const mime = String(value.type || '').trim().toLowerCase()
+  const data = String(value.data || '')
+  const prefix = `data:${mime};base64,`
+  const base64 = data.startsWith(prefix) ? data.slice(prefix.length) : ''
+  const allowedDescription = allowedTypes.includes('application/pdf') ? 'PDF, JPG, PNG, or WEBP' : 'JPG, PNG, or WEBP'
+
+  if (!allowedTypes.includes(mime)) throw new Error(`${label} must be a ${allowedDescription} file.`)
+  if (!base64) throw new Error(`${label} upload is not valid.`)
+  if (Math.ceil(base64.length * 3 / 4) > uploadMaxBytes) throw new Error(`${label} must be 3 MB or smaller.`)
+  return { name, mime }
+}
+
+function syncStaticVipEarnings(account) {
+  if (!Array.isArray(account.purchases) || !account.purchases.length) return false
+
+  let changed = false
+  account.dailyEarnings = Array.isArray(account.dailyEarnings) ? account.dailyEarnings : []
+  account.transactions = Array.isArray(account.transactions) ? account.transactions : []
+  const creditedDates = new Set(account.dailyEarnings.map((earning) => `${earning.tierId}:${earning.earningDate}`))
+
+  for (const purchase of account.purchases) {
+    const tierId = purchase.tierId || purchase.id
+    const lastEarningDate = account.dailyEarnings
+      .filter((earning) => earning.tierId === tierId)
+      .map((earning) => earning.earningDate)
+      .sort()
+      .at(-1)
+    const earningDates = getStaticMissingDailyEarningDates(purchase.createdAt, lastEarningDate)
+    const dailyAmount = roundStaticMoney(getTierProjection(Number(purchase.amount) || 0).dailyIncome)
+
+    for (const earningDate of earningDates) {
+      const earningKey = `${tierId}:${earningDate}`
+      if (creditedDates.has(earningKey)) continue
+
+      creditedDates.add(earningKey)
+      account.wallet.balance = roundStaticMoney((Number(account.wallet.balance) || 0) + dailyAmount)
+      account.dailyEarnings = [{ tierId, earningDate, amount: dailyAmount, createdAt: new Date().toISOString() }, ...account.dailyEarnings]
+      account.transactions = [createStaticTransaction('earning', dailyAmount, purchase.crypto, null, null, `${purchase.level} daily income ${earningDate}`, 'Credited'), ...account.transactions]
+      changed = true
+    }
+  }
+
+  return changed
+}
+
+function getStaticMissingDailyEarningDates(purchaseCreatedAt, lastEarningDate) {
+  const today = startOfStaticUtcDay(new Date())
+  const lastDate = lastEarningDate ? parseStaticUtcDate(lastEarningDate) : null
+  const purchaseDate = parseStaticUtcDate(purchaseCreatedAt)
+  let currentDate = addStaticUtcDays(startOfStaticUtcDay(lastDate || purchaseDate), 1)
+  const dates = []
+
+  while (currentDate <= today) {
+    dates.push(currentDate.toISOString().slice(0, 10))
+    currentDate = addStaticUtcDays(currentDate, 1)
+  }
+
+  return dates
+}
+
+function parseStaticUtcDate(value) {
+  if (!value) return new Date()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(value))) return new Date(`${value}T00:00:00.000Z`)
+
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? new Date() : date
+}
+
+function startOfStaticUtcDay(date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
+}
+
+function addStaticUtcDays(date, days) {
+  const nextDate = new Date(date)
+  nextDate.setUTCDate(nextDate.getUTCDate() + days)
+  return nextDate
+}
+
+function roundStaticMoney(amount) {
+  return Math.round((amount + Number.EPSILON) * 100) / 100
 }
 
 function requireStaticVerifiedAccount(account) {
@@ -1052,6 +1278,7 @@ function Icon({ name }) {
     'arrow-up': <><path d="M12 19V5M6 11l6-6 6 6" /></>,
     'arrow-left': <><path d="M19 12H5M11 18l-6-6 6-6" /></>,
     download: <><path d="M12 4v10M8 10l4 4 4-4M5 20h14" /></>,
+    upload: <><path d="M12 20V6M7 11l5-5 5 5" /><path d="M5 20h14" /></>,
     logout: <><path d="M10 5H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4M14 8l4 4-4 4M18 12H9" /></>,
     home: <><path d="m4 11 8-7 8 7v9H4z" /><path d="M9 20v-6h6v6" /></>,
     grid: <><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></>,
