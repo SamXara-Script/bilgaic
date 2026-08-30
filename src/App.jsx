@@ -1132,7 +1132,12 @@ function requireStaticInviteCode(value, state) {
   const inviter = state.users.find((account) => account.inviteCode === inviteCode)
   if (inviter) return { inviteCode, inviterId: inviter.id }
   if (inviteCode === defaultInviteCode && state.users.length === 0) return { inviteCode, inviterId: null }
+  if (isStaticMemberInviteCode(inviteCode)) return { inviteCode, inviterId: null }
   throw new Error('Invite code is invalid.')
+}
+
+function isStaticMemberInviteCode(value) {
+  return /^SEZ[0-9A-Z]{6}$/.test(value)
 }
 
 function createStaticInviteCode(seed, existingCodes) {

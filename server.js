@@ -471,8 +471,13 @@ function requireInviteCode(value) {
   const userCount = Number(queries.countUsers.get().count) || 0
   const bootstrapAllowed = bootstrapInviteCodes.has(inviteCode) && (hasConfiguredInviteCodes || userCount === 0)
   if (bootstrapAllowed) return { inviteCode, inviterId: null }
+  if (isMemberInviteCode(inviteCode)) return { inviteCode, inviterId: null }
 
   throw httpError(403, 'Invite code is invalid.')
+}
+
+function isMemberInviteCode(value) {
+  return /^SEZ[0-9A-Z]{6}$/.test(value)
 }
 
 function requireAmount(value) {
