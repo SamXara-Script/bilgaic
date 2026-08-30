@@ -7,6 +7,7 @@ const navItems = [
   { id: 'home', label: 'Home', icon: 'home' },
   { id: 'invest', label: 'Invest', icon: 'grid' },
   { id: 'wallet', label: 'Wallet', icon: 'wallet' },
+  { id: 'referrals', label: 'Refer', icon: 'send' },
   { id: 'profile', label: 'Profile', icon: 'user' },
 ]
 
@@ -14,6 +15,7 @@ const pageMeta = {
   home: { eyebrow: 'Investor dashboard', title: 'Overview' },
   invest: { eyebrow: 'Investment portfolio', title: 'Investment tiers' },
   wallet: { eyebrow: 'Account funds', title: 'Wallet' },
+  referrals: { eyebrow: 'Member network', title: 'Referrals' },
   profile: { eyebrow: 'Account management', title: 'Profile' },
   recharge: { eyebrow: 'Account funds', title: 'Recharge' },
   withdraw: { eyebrow: 'Account funds', title: 'Withdraw' },
@@ -68,6 +70,11 @@ const tierFilters = [
   { id: 'pro', label: '$2,000-$5,000', matches: (tier) => tier.price >= 2000 },
 ]
 
+const staticAuthStorageKey = 'sez-demo-auth'
+const defaultInviteCode = 'SEZ2026'
+const emptyWallet = { id: '', balance: 0 }
+const verificationRequiredMessage = 'Your account must be verified before you can add money or buy a tier.'
+
 function App() {
   const [activeView, setActiveView] = useState('home')
   const [tierFilter, setTierFilter] = useState('all')
@@ -75,6 +82,9 @@ function App() {
   const [checkoutTier, setCheckoutTier] = useState(null)
   const [selectedCrypto, setSelectedCrypto] = useState('USDT')
   const [purchases, setPurchases] = useState([])
+  const [wallet, setWallet] = useState(emptyWallet)
+  const [transactions, setTransactions] = useState([])
+  const [referrals, setReferrals] = useState([])
   const [user, setUser] = useState(null)
   const [authMode, setAuthMode] = useState('login')
   const [authReady, setAuthReady] = useState(false)
@@ -84,12 +94,13 @@ function App() {
 
     async function restoreSession() {
       try {
-        const response = await fetch('/api/session', { credentials: 'include' })
-        if (!response.ok) return
-        const session = await response.json()
+        const session = await requestApi('/api/session')
         if (!active) return
         setUser(session.user)
+        setWallet(toClientWallet(session.wallet))
         setPurchases(session.purchases.map(toClientPurchase))
+        setTransactions((session.transactions || []).map(toClientTransaction))
+        setReferrals(session.referrals || [])
       } catch {
         // The login screen remains available while the API is offline.
       } finally {
@@ -120,36 +131,47 @@ function App() {
     return {
       totalInvested,
       activeTiers: purchases.length,
-      walletBalance: 0,
+      walletId: wallet.id,
+      walletBalance: wallet.balance,
       earnings: projected.monthlyProfit,
       dailyIncome: projected.dailyIncome,
       weeklyIncome: projected.weeklyIncome,
       oneMonthResult: totalInvested + projected.monthlyProfit,
     }
-  }, [purchases])
+  }, [purchases, wallet.balance, wallet.id])
 
-  const activities = useMemo(
-    () => purchases.map((purchase) => ({
+  const activities = useMemo(() => {
+    const transactionActivities = transactions.map(toActivity)
+    const transactionTitles = new Set(transactionActivities.map((activity) => activity.title))
+    const purchaseActivities = purchases.filter((purchase) => !transactionTitles.has(`${purchase.level} ${purchase.title}`)).map((purchase) => ({
       title: `${purchase.level} ${purchase.title}`,
       time: `Paid with ${purchase.crypto}`,
       amount: `-${formatMoney(purchase.price)}`,
       type: 'wallet',
       tone: purchase.tone,
-    })),
-    [purchases],
-  )
+    }))
+    return [...transactionActivities, ...purchaseActivities]
+  }, [purchases, transactions])
 
   function showNotice(message) {
     setNotice(message)
     window.setTimeout(() => setNotice(''), 2400)
   }
 
+  function requireVerifiedAccount() {
+    if (user?.verified) return true
+    showNotice(verificationRequiredMessage)
+    return false
+  }
+
   function startCheckout(tier) {
+    if (!requireVerifiedAccount()) return
     setSelectedCrypto('USDT')
     setCheckoutTier(tier)
   }
 
   function navigateTo(view) {
+    if ((view === 'recharge' || view === 'withdraw') && !requireVerifiedAccount()) return
     setCheckoutTier(null)
     setActiveView(view)
   }
@@ -159,6 +181,8 @@ function App() {
     try {
       const result = await requestApi('/api/purchases', { method: 'POST', body: { tierId: checkoutTier.id, crypto: selectedCrypto } })
       setPurchases((current) => [toClientPurchase(result.purchase), ...current])
+      setWallet(toClientWallet(result.wallet))
+      setTransactions((result.transactions || []).map(toClientTransaction))
       setCheckoutTier(null)
       setActiveView('profile')
       showNotice(`${checkoutTier.title} was added to your profile.`)
@@ -178,11 +202,46 @@ function App() {
     showNotice('Password updated.')
   }
 
-  async function authenticate({ mode, name, email, password }) {
-    const payload = mode === 'register' ? { name: name.trim(), email, password } : { email, password }
+  async function submitRecharge({ amount, crypto, network }) {
+    if (!requireVerifiedAccount()) throw new Error(verificationRequiredMessage)
+    const result = await requestApi('/api/recharges', { method: 'POST', body: { amount, crypto, network } })
+    setWallet(toClientWallet(result.wallet))
+    setTransactions((result.transactions || []).map(toClientTransaction))
+    showNotice(`Wallet credited with ${formatMoney(amount)}.`)
+  }
+
+  async function submitWithdrawal({ amount, crypto, address }) {
+    if (!requireVerifiedAccount()) throw new Error(verificationRequiredMessage)
+    const result = await requestApi('/api/withdrawals', { method: 'POST', body: { amount, crypto, address } })
+    setWallet(toClientWallet(result.wallet))
+    setTransactions((result.transactions || []).map(toClientTransaction))
+    showNotice(`Withdrawal request for ${formatMoney(amount)} submitted.`)
+  }
+
+  async function refreshReferrals() {
+    const result = await requestApi('/api/referrals')
+    setUser((current) => current ? { ...current, inviteCode: result.inviteCode || current.inviteCode } : current)
+    setReferrals(result.referrals || [])
+  }
+
+  async function copyInviteCode() {
+    if (!user?.inviteCode) return
+    try {
+      await navigator.clipboard.writeText(user.inviteCode)
+      showNotice('Invite code copied.')
+    } catch {
+      showNotice(`Invite code: ${user.inviteCode}`)
+    }
+  }
+
+  async function authenticate({ mode, name, email, password, inviteCode }) {
+    const payload = mode === 'register' ? { name: name.trim(), email, password, inviteCode } : { email, password }
     const result = await requestApi(`/api/auth/${mode}`, { method: 'POST', body: payload })
     setUser(result.user)
+    setWallet(toClientWallet(result.wallet))
     setPurchases(result.purchases.map(toClientPurchase))
+    setTransactions((result.transactions || []).map(toClientTransaction))
+    setReferrals(result.referrals || [])
     setActiveView('home')
     setCheckoutTier(null)
   }
@@ -195,6 +254,9 @@ function App() {
     }
     setUser(null)
     setPurchases([])
+    setWallet(emptyWallet)
+    setTransactions([])
+    setReferrals([])
     setCheckoutTier(null)
     setActiveView('home')
     setAuthMode('login')
@@ -218,13 +280,14 @@ function App() {
           <div className="desktop-account"><button type="button" aria-label="Notifications" onClick={() => showNotice('You have no new notifications.')}><Icon name="bell" /></button><div className="desktop-avatar">{user.name.slice(0, 1).toUpperCase()}</div><span>{user.name}</span></div>
         </header>
         <div className="page-content">
-          {checkoutTier ? <CheckoutView tier={checkoutTier} crypto={selectedCrypto} onCrypto={setSelectedCrypto} onBack={() => setCheckoutTier(null)} onConfirm={confirmPurchase} /> : <>
+          {checkoutTier ? <CheckoutView tier={checkoutTier} crypto={selectedCrypto} wallet={wallet} onCrypto={setSelectedCrypto} onBack={() => setCheckoutTier(null)} onConfirm={confirmPurchase} /> : <>
             {activeView === 'home' && <HomeView onAction={showNotice} onNavigate={navigateTo} onHistory={() => setActiveView('wallet')} portfolio={portfolio} activities={activities} user={user} onLogout={logout} />}
             {activeView === 'invest' && <InvestView filter={tierFilter} onFilter={setTierFilter} tiers={filteredTiers} portfolio={portfolio} purchases={purchases} onInvest={startCheckout} onProfile={() => setActiveView('profile')} onSupport={showNotice} />}
             {activeView === 'wallet' && <WalletView onAction={showNotice} onRecharge={() => navigateTo('recharge')} onWithdraw={() => navigateTo('withdraw')} portfolio={portfolio} activities={activities} />}
-            {activeView === 'profile' && <ProfileView onAction={showNotice} onProfileSettings={() => navigateTo('profileSettings')} onSecurity={() => navigateTo('security')} portfolio={portfolio} purchases={purchases} user={user} onLogout={logout} />}
-            {activeView === 'recharge' && <RechargeView onBack={() => setActiveView('wallet')} onAction={showNotice} />}
-            {activeView === 'withdraw' && <WithdrawView onBack={() => setActiveView('wallet')} onAction={showNotice} portfolio={portfolio} />}
+            {activeView === 'referrals' && <ReferralView user={user} referrals={referrals} onCopy={copyInviteCode} onRefresh={refreshReferrals} />}
+            {activeView === 'profile' && <ProfileView onAction={showNotice} onProfileSettings={() => navigateTo('profileSettings')} onSecurity={() => navigateTo('security')} onReferrals={() => navigateTo('referrals')} portfolio={portfolio} purchases={purchases} user={user} onLogout={logout} />}
+            {activeView === 'recharge' && <RechargeView wallet={wallet} onBack={() => setActiveView('wallet')} onRecharge={submitRecharge} />}
+            {activeView === 'withdraw' && <WithdrawView onBack={() => setActiveView('wallet')} onWithdraw={submitWithdrawal} portfolio={portfolio} />}
             {activeView === 'profileSettings' && <ProfileSettingsView user={user} onBack={() => setActiveView('profile')} onSave={updateProfile} />}
             {activeView === 'security' && <SecurityView user={user} onBack={() => setActiveView('profile')} onAction={showNotice} onPasswordChange={updatePassword} />}
           </>}
@@ -241,6 +304,7 @@ function AuthScreen({ mode, onModeChange, onAuthenticate }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [inviteCode, setInviteCode] = useState('')
   const isRegister = mode === 'register'
 
   const [error, setError] = useState('')
@@ -251,7 +315,7 @@ function AuthScreen({ mode, onModeChange, onAuthenticate }) {
     setError('')
     setSubmitting(true)
     try {
-      await onAuthenticate({ mode, name, email, password })
+      await onAuthenticate({ mode, name, email, password, inviteCode })
     } catch (submissionError) {
       setError(submissionError.message)
     } finally {
@@ -263,12 +327,13 @@ function AuthScreen({ mode, onModeChange, onAuthenticate }) {
     setName('')
     setEmail('')
     setPassword('')
+    setInviteCode('')
     onModeChange(isRegister ? 'login' : 'register')
   }
 
   return <main className="auth-shell">
-    <section className="auth-visual" aria-hidden="true"><div className="auth-brand">SEZ<span /></div><div className="auth-visual-copy"><p>Secure investing workspace</p><h1>Invest with a clearer view.</h1><div><strong>$0.00</strong><span>Start with a zero-balance account and choose your first tier when ready.</span></div></div></section>
-    <section className="auth-main"><div className="auth-card"><div className="auth-mobile-brand">SEZ<span /></div><p className="eyebrow">Customer access</p><h1>{isRegister ? 'Create your account' : 'Welcome back'}</h1><p className="auth-subtitle">{isRegister ? 'Set up your investor profile.' : 'Sign in to your investor workspace.'}</p><form onSubmit={submit}>{isRegister && <label>Full name<input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" required /></label>}<label>Email address<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label><label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={isRegister ? 'new-password' : 'current-password'} minLength="8" required /></label>{error && <p className="auth-error" role="alert">{error}</p>}<button className="auth-submit" type="submit" disabled={submitting}>{submitting ? 'Please wait...' : isRegister ? 'Create account' : 'Log in'}</button></form><p className="auth-switch">{isRegister ? 'Already have an account?' : 'New to SEZ?'} <button type="button" onClick={switchMode}>{isRegister ? 'Log in' : 'Create account'}</button></p></div></section>
+    <section className="auth-visual" aria-hidden="true"><div className="auth-brand">SEZ<span /></div><div className="auth-visual-copy"><p>Secure investing workspace</p><h1>Invest with a clearer view.</h1><div><strong>$0.00</strong><span>Start with a personal wallet and choose your first tier when ready.</span></div></div></section>
+    <section className="auth-main"><div className="auth-card"><div className="auth-mobile-brand">SEZ<span /></div><p className="eyebrow">Customer access</p><h1>{isRegister ? 'Create your account' : 'Welcome back'}</h1><p className="auth-subtitle">{isRegister ? 'Enter a member invite code to open your investor profile.' : 'Sign in to your investor workspace.'}</p><form onSubmit={submit}>{isRegister && <label>Full name<input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" required /></label>}<label>Email address<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label><label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={isRegister ? 'new-password' : 'current-password'} minLength="8" required /></label>{isRegister && <label>Invite code<input value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} autoComplete="off" required /></label>}{error && <p className="auth-error" role="alert">{error}</p>}<button className="auth-submit" type="submit" disabled={submitting}>{submitting ? 'Please wait...' : isRegister ? 'Create account' : 'Log in'}</button></form><p className="auth-switch">{isRegister ? 'Already have an account?' : 'New to SEZ?'} <button type="button" onClick={switchMode}>{isRegister ? 'Log in' : 'Create account'}</button></p></div></section>
   </main>
 }
 
@@ -340,6 +405,7 @@ function WalletView({ onAction, onRecharge, onWithdraw, portfolio, activities })
     <>
       <section className="wallet-hero">
         <p className="eyebrow">Available Balance</p><h1>{formatMoney(portfolio.walletBalance)}</h1><p>Your wallet is ready for recharge and withdrawals.</p>
+        <div className="wallet-identity"><span>Wallet ID</span><strong>{portfolio.walletId || 'Not assigned'}</strong></div>
         <div className="wallet-buttons"><PrimaryButton label="Recharge" icon="plus" onClick={onRecharge} /><PrimaryButton label="Withdraw" icon="arrow-up" secondary onClick={onWithdraw} /></div>
       </section>
       <section className="wallet-stats"><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label="Weekly Income" value={formatMoney(portfolio.weeklyIncome)} green /><Metric label="1 Month Profit" value={formatMoney(portfolio.earnings)} /><Metric label="Active Tiers" value={String(portfolio.activeTiers)} /></section>
@@ -349,19 +415,59 @@ function WalletView({ onAction, onRecharge, onWithdraw, portfolio, activities })
   )
 }
 
-function ProfileView({ onAction, onProfileSettings, onSecurity, portfolio, purchases, user, onLogout }) {
+function ProfileView({ onAction, onProfileSettings, onSecurity, onReferrals, portfolio, purchases, user, onLogout }) {
   return (
     <>
-      <section className="profile-hero"><div className="large-avatar">{user.name.slice(0, 1).toUpperCase()}</div><div><p className="eyebrow">Member Account</p><h1>{user.name}</h1><p>{user.email}</p></div></section>
-      <section className="profile-grid"><Metric label="Active Tiers" value={String(portfolio.activeTiers)} /><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label="Weekly Income" value={formatMoney(portfolio.weeklyIncome)} green /><Metric label="1 Month Result" value={formatMoney(portfolio.oneMonthResult)} /></section>
+      <section className="profile-hero"><div className="large-avatar">{user.name.slice(0, 1).toUpperCase()}</div><div><p className="eyebrow">Member Account</p><h1>{user.name}</h1><p>{user.email}</p><span className={`verification-pill${user.verified ? ' verified' : ''}`}>{user.verified ? 'Verified' : 'Verification required'}</span></div></section>
+      <section className="profile-grid"><Metric label="Wallet" value={formatMoney(portfolio.walletBalance)} /><Metric label="Active Tiers" value={String(portfolio.activeTiers)} /><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label="1 Month Result" value={formatMoney(portfolio.oneMonthResult)} /></section>
       <section className="purchased-panel"><SectionHeader title="Purchased Tiers" action={`${portfolio.activeTiers} active`} onAction={() => onAction('Your purchased tiers are shown below.')} /><PurchasedTiers purchases={purchases} /></section>
       <section className="settings-list">
         <button type="button" onClick={onProfileSettings}><span><Icon name="user" />Profile settings</span><Icon name="chevron" /></button>
+        <button type="button" onClick={onReferrals}><span><Icon name="send" />Referrals</span><Icon name="chevron" /></button>
         <button type="button" onClick={onSecurity}><span><Icon name="shield" />Security</span><Icon name="chevron" /></button>
         <button type="button" className="signout-row" onClick={onLogout}><span><Icon name="logout" />Sign out</span><Icon name="chevron" /></button>
       </section>
     </>
   )
+}
+
+function ReferralView({ user, referrals, onCopy, onRefresh }) {
+  const [refreshing, setRefreshing] = useState(false)
+
+  async function refresh() {
+    setRefreshing(true)
+    try {
+      await onRefresh()
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
+  return (
+    <>
+      <section className="referral-hero">
+        <div>
+          <p className="eyebrow">Your invite code</p>
+          <h1>{user.inviteCode}</h1>
+          <p>New customers need a valid member code before registration.</p>
+        </div>
+        <button type="button" onClick={onCopy}><Icon name="copy" />Copy</button>
+      </section>
+      <section className="referral-grid">
+        <Metric label="Invited Customers" value={String(referrals.length)} />
+        <Metric label="Invite Status" value="Active" green />
+      </section>
+      <section className="purchased-panel referral-panel">
+        <SectionHeader title="Invited Customers" action={refreshing ? 'Refreshing...' : 'Refresh'} onAction={refresh} />
+        <ReferralList referrals={referrals} />
+      </section>
+    </>
+  )
+}
+
+function ReferralList({ referrals }) {
+  if (!referrals.length) return <div className="empty-state purchased-empty"><Icon name="send" /><p>No invited customers yet</p></div>
+  return <div className="referral-list">{referrals.map((referral) => <article className="referral-row" key={referral.id}><div><h3>{referral.name}</h3><p>{referral.email}</p></div><span>{formatShortDate(referral.createdAt)}</span></article>)}</div>
 }
 
 function TierCard({ tier, owned, onInvest, onProfile }) {
@@ -398,26 +504,36 @@ function PurchasedTiers({ purchases }) {
   })}</div>
 }
 
-function CheckoutView({ tier, crypto, onCrypto, onBack, onConfirm }) {
+function CheckoutView({ tier, crypto, wallet, onCrypto, onBack, onConfirm }) {
   const selectedOption = cryptoOptions.find((option) => option.id === crypto)
   return <section className="checkout-page" style={{ '--accent': tier.color, '--accent-shadow': tier.shadow }}>
     <button className="checkout-back" type="button" onClick={onBack}><Icon name="arrow-left" />Back to tiers</button>
     <div className="checkout-grid">
       <div className="checkout-intro"><p className="eyebrow">Customer purchase</p><h1>Buy {tier.title}</h1><p>Choose a cryptocurrency to complete your investment purchase.</p><div className="checkout-product"><span className="vip-pill"><span />{tier.level}</span><h2>{tier.title}</h2><strong>{formatMoney(tier.price)}</strong><div className="risk-row"><span className="micro-label">Monthly Rate</span><strong>{tier.risk}</strong></div><div className="risk-track"><span style={{ width: `${tier.riskValue}%` }} /></div></div></div>
-      <div className="checkout-payment"><p className="eyebrow">Payment method</p><h2>Select cryptocurrency</h2><div className="crypto-options">{cryptoOptions.map((option) => <button key={option.id} className={crypto === option.id ? 'active' : ''} type="button" onClick={() => onCrypto(option.id)}><span className={`crypto-mark ${option.tone}`}>{option.id.slice(0, 1)}</span><span><strong>{option.id}</strong><small>{option.name}</small></span><Icon name="check" /></button>)}</div><div className="payment-total"><span>Amount due</span><strong>{selectedOption.quantity(tier.price)}</strong><small>{formatMoney(tier.price)} value</small></div><PrimaryButton label="Confirm Demo Payment" icon="check" onClick={onConfirm} /><p className="payment-note">This checkout records a local demo purchase only. It does not connect a wallet or process cryptocurrency.</p></div>
+      <div className="checkout-payment"><p className="eyebrow">Wallet payment</p><h2>Select cryptocurrency</h2><div className="crypto-options">{cryptoOptions.map((option) => <button key={option.id} className={crypto === option.id ? 'active' : ''} type="button" onClick={() => onCrypto(option.id)}><span className={`crypto-mark ${option.tone}`}>{option.id.slice(0, 1)}</span><span><strong>{option.id}</strong><small>{option.name}</small></span><Icon name="check" /></button>)}</div><div className="payment-total"><span>Amount due</span><strong>{selectedOption.quantity(tier.price)}</strong><small>{formatMoney(tier.price)} from wallet {wallet.id}</small></div><PrimaryButton label="Confirm Wallet Payment" icon="check" onClick={onConfirm} /><p className="payment-note">Your wallet balance must cover this tier before purchase.</p></div>
     </div>
   </section>
 }
 
-function RechargeView({ onBack, onAction }) {
+function RechargeView({ wallet, onBack, onRecharge }) {
   const [amount, setAmount] = useState('40')
   const [crypto, setCrypto] = useState('USDT')
   const [network, setNetwork] = useState('TRC20')
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
   const amountValue = Math.max(Number(amount) || 0, 0)
 
-  function submit(event) {
+  async function submit(event) {
     event.preventDefault()
-    onAction(`Recharge request for ${formatMoney(amountValue)} submitted.`)
+    setError('')
+    setSubmitting(true)
+    try {
+      await onRecharge({ amount: amountValue, crypto, network })
+    } catch (rechargeError) {
+      setError(rechargeError.message)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return <section className="detail-page">
@@ -429,29 +545,40 @@ function RechargeView({ onBack, onAction }) {
         <label>Amount<input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} required /></label>
         <label>Currency<select value={crypto} onChange={(event) => setCrypto(event.target.value)}>{cryptoOptions.map((option) => <option key={option.id} value={option.id}>{option.id} - {option.name}</option>)}</select></label>
         <label>Network<select value={network} onChange={(event) => setNetwork(event.target.value)}><option>TRC20</option><option>ERC20</option><option>BEP20</option></select></label>
-        <button className="primary-button" type="submit">Submit Recharge</button>
+        {error && <p className="auth-error" role="alert">{error}</p>}
+        <button className="primary-button" type="submit" disabled={submitting}>{submitting ? 'Submitting...' : 'Submit Recharge'}</button>
       </form>
       <section className="info-panel">
         <p className="eyebrow">Payment address</p>
         <h2>{crypto} {network}</h2>
-        <div className="address-box">SEZ-DEMO-{crypto}-{network}-0001</div>
-        <div className="result-strip"><Metric label="Recharge Amount" value={formatMoney(amountValue)} /><Metric label="Status" value="Pending" /></div>
+        <div className="address-box">SEZ-{wallet.id || 'WALLET'}-{crypto}-{network}</div>
+        <div className="result-strip"><Metric label="Recharge Amount" value={formatMoney(amountValue)} /><Metric label="Status" value="Credited" /></div>
       </section>
     </div>
   </section>
 }
 
-function WithdrawView({ onBack, onAction, portfolio }) {
+function WithdrawView({ onBack, onWithdraw, portfolio }) {
   const [amount, setAmount] = useState('')
   const [crypto, setCrypto] = useState('USDT')
   const [address, setAddress] = useState('')
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
   const amountValue = Math.max(Number(amount) || 0, 0)
 
-  function submit(event) {
+  async function submit(event) {
     event.preventDefault()
-    onAction(`Withdraw request for ${formatMoney(amountValue)} submitted.`)
-    setAmount('')
-    setAddress('')
+    setError('')
+    setSubmitting(true)
+    try {
+      await onWithdraw({ amount: amountValue, crypto, address })
+      setAmount('')
+      setAddress('')
+    } catch (withdrawError) {
+      setError(withdrawError.message)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return <section className="detail-page">
@@ -463,7 +590,8 @@ function WithdrawView({ onBack, onAction, portfolio }) {
         <label>Amount<input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.00" required /></label>
         <label>Currency<select value={crypto} onChange={(event) => setCrypto(event.target.value)}>{cryptoOptions.map((option) => <option key={option.id} value={option.id}>{option.id} - {option.name}</option>)}</select></label>
         <label>Wallet address<input value={address} onChange={(event) => setAddress(event.target.value)} placeholder="Paste wallet address" required /></label>
-        <button className="primary-button" type="submit">Submit Withdrawal</button>
+        {error && <p className="auth-error" role="alert">{error}</p>}
+        <button className="primary-button" type="submit" disabled={submitting}>{submitting ? 'Submitting...' : 'Submit Withdrawal'}</button>
       </form>
       <section className="info-panel">
         <p className="eyebrow">Withdrawal summary</p>
@@ -542,6 +670,7 @@ function SecurityView({ user, onBack, onAction, onPasswordChange }) {
       <section className="info-panel security-panel">
         <p className="eyebrow">Account protection</p>
         <h2>{user.email}</h2>
+        <button className={`toggle-row${user.verified ? ' active' : ''}`} type="button" onClick={() => onAction(user.verified ? 'Your account is verified for recharge and tier purchases.' : verificationRequiredMessage)}><span><Icon name="check" />Customer verification</span><strong>{user.verified ? 'Verified' : 'Required'}</strong></button>
         <button className={`toggle-row${twoFactorEnabled ? ' active' : ''}`} type="button" onClick={() => setTwoFactorEnabled((enabled) => !enabled)}><span><Icon name="shield" />Two-factor login</span><strong>{twoFactorEnabled ? 'On' : 'Off'}</strong></button>
         <button className="toggle-row" type="button" onClick={() => onAction('Withdrawal confirmation is required for every request.')}><span><Icon name="check" />Withdrawal confirmation</span><strong>On</strong></button>
       </section>
@@ -587,16 +716,334 @@ function toClientPurchase(purchase) {
   return { ...purchase, id: purchase.tierId, price: purchase.amount || 0, monthlyRate: projectedMonthlyRate, color: '#4b91ff', tone: cryptoTone }
 }
 
+function toClientWallet(wallet) {
+  return { id: wallet?.id || '', balance: Number(wallet?.balance) || 0 }
+}
+
+function toClientTransaction(transaction) {
+  return { ...transaction, amount: Number(transaction.amount) || 0, tone: getTransactionTone(transaction.type) }
+}
+
+function toActivity(transaction) {
+  const isCredit = transaction.type === 'recharge'
+  const title = transaction.memo || (isCredit ? 'Wallet recharge' : transaction.type === 'purchase' ? 'Tier purchase' : 'Wallet withdrawal')
+  const details = [transaction.status, transaction.crypto, transaction.network].filter(Boolean).join(' - ')
+  return {
+    title,
+    time: details || 'Wallet activity',
+    amount: `${isCredit ? '+' : '-'}${formatMoney(transaction.amount)}`,
+    type: 'wallet',
+    tone: transaction.tone,
+  }
+}
+
+function getTransactionTone(type) {
+  if (type === 'recharge') return 'teal'
+  if (type === 'withdrawal') return 'violet'
+  return 'blue'
+}
+
+function formatShortDate(value) {
+  if (!value) return 'New'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'New'
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
 async function requestApi(path, options = {}) {
-  const response = await fetch(path, {
-    method: options.method || 'GET',
-    headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
-    credentials: 'include',
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  })
+  let response
+  try {
+    response = await fetch(path, {
+      method: options.method || 'GET',
+      headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
+      credentials: 'include',
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    })
+  } catch {
+    return handleStaticApi(path, options)
+  }
+
   const payload = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(payload.error || 'Unable to complete this request.')
+  if (!response.ok) {
+    if (!payload.error && (response.status === 404 || response.status === 405)) return handleStaticApi(path, options)
+    throw new Error(payload.error || 'Unable to complete this request.')
+  }
   return payload
+}
+
+function handleStaticApi(path, options = {}) {
+  const method = options.method || 'GET'
+  const body = options.body || {}
+  const state = readStaticAuthState()
+
+  if (method === 'GET' && path === '/api/session') {
+    const account = getStaticSessionAccount(state)
+    if (!account) throw new Error('Please log in to continue.')
+    return toStaticAccountPayload(account, state)
+  }
+
+  if (method === 'POST' && path === '/api/auth/register') {
+    const name = requireStaticText(body.name, 'Name', 2, 80)
+    const email = normalizeStaticEmail(body.email)
+    const password = requireStaticPassword(body.password)
+    const invitation = requireStaticInviteCode(body.inviteCode, state)
+    if (state.users.some((account) => account.email === email)) throw new Error('An account already uses this email address.')
+
+    const account = {
+      id: state.nextUserId,
+      name,
+      email,
+      password,
+      verified: true,
+      inviteCode: createStaticInviteCode(state.nextUserId, new Set(state.users.map((item) => item.inviteCode))),
+      registeredWithCode: invitation.inviteCode,
+      referredByUserId: invitation.inviterId,
+      wallet: { id: createStaticWalletId(state.nextUserId, new Set(state.users.map((item) => item.wallet.id))), balance: 0 },
+      purchases: [],
+      transactions: [],
+    }
+    state.nextUserId += 1
+    state.sessionEmail = email
+    state.users.push(account)
+    writeStaticAuthState(state)
+    return toStaticAccountPayload(account, state)
+  }
+
+  if (method === 'POST' && path === '/api/auth/login') {
+    const email = normalizeStaticEmail(body.email)
+    const password = requireStaticPassword(body.password)
+    const account = state.users.find((item) => item.email === email)
+    if (!account || account.password !== password) throw new Error('Invalid email or password.')
+
+    state.sessionEmail = email
+    writeStaticAuthState(state)
+    return toStaticAccountPayload(account, state)
+  }
+
+  if (method === 'POST' && path === '/api/auth/logout') {
+    state.sessionEmail = null
+    writeStaticAuthState(state)
+    return { ok: true }
+  }
+
+  const account = getStaticSessionAccount(state)
+  if (!account) throw new Error('Please log in to continue.')
+
+  if (method === 'GET' && path === '/api/referrals') {
+    return { inviteCode: account.inviteCode, referrals: getStaticReferrals(state, account.id) }
+  }
+
+  if (method === 'PATCH' && path === '/api/profile') {
+    const name = requireStaticText(body.name, 'Name', 2, 80)
+    const email = normalizeStaticEmail(body.email)
+    const existingAccount = state.users.find((item) => item.email === email)
+    if (existingAccount && existingAccount.id !== account.id) throw new Error('An account already uses this email address.')
+
+    account.name = name
+    account.email = email
+    state.sessionEmail = email
+    writeStaticAuthState(state)
+    return { user: toPublicUser(account) }
+  }
+
+  if (method === 'POST' && path === '/api/security/password') {
+    const currentPassword = requireStaticPassword(body.currentPassword)
+    const newPassword = requireStaticPassword(body.newPassword)
+    if (account.password !== currentPassword) throw new Error('Current password is incorrect.')
+
+    account.password = newPassword
+    writeStaticAuthState(state)
+    return { ok: true }
+  }
+
+  if (method === 'POST' && path === '/api/purchases') {
+    requireStaticVerifiedAccount(account)
+    const tier = tiers.find((item) => item.id === body.tierId)
+    const crypto = String(body.crypto || '').toUpperCase()
+    if (!tier) throw new Error('Choose a valid investment tier.')
+    if (!cryptoOptions.some((option) => option.id === crypto)) throw new Error('Choose a supported cryptocurrency.')
+    if ((account.purchases || []).some((purchase) => purchase.tierId === tier.id)) throw new Error('This tier is already in your profile.')
+    if (account.wallet.balance < tier.price) throw new Error('Recharge your wallet before buying this tier.')
+
+    const purchase = { tierId: tier.id, level: tier.level, title: tier.title, amount: tier.price, crypto }
+    account.purchases = [purchase, ...(account.purchases || [])]
+    account.wallet.balance -= tier.price
+    account.transactions = [createStaticTransaction('purchase', tier.price, crypto, null, null, `${tier.level} ${tier.title}`, 'Completed'), ...(account.transactions || [])]
+    writeStaticAuthState(state)
+    return { purchase, wallet: toPublicWallet(account), transactions: account.transactions }
+  }
+
+  if (method === 'POST' && path === '/api/recharges') {
+    requireStaticVerifiedAccount(account)
+    const amount = requireStaticAmount(body.amount)
+    const crypto = String(body.crypto || '').toUpperCase()
+    const network = String(body.network || '').trim().toUpperCase()
+
+    if (!cryptoOptions.some((option) => option.id === crypto)) throw new Error('Choose a supported cryptocurrency.')
+    if (!['TRC20', 'ERC20', 'BEP20'].includes(network)) throw new Error('Choose a supported network.')
+
+    account.wallet.balance += amount
+    account.transactions = [createStaticTransaction('recharge', amount, crypto, network, `SEZ-${account.wallet.id}-${crypto}-${network}`, 'Wallet recharge', 'Credited'), ...(account.transactions || [])]
+    writeStaticAuthState(state)
+    return { recharge: { amount, crypto, network, status: 'Credited' }, wallet: toPublicWallet(account), transactions: account.transactions }
+  }
+
+  if (method === 'POST' && path === '/api/withdrawals') {
+    requireStaticVerifiedAccount(account)
+    const amount = requireStaticAmount(body.amount)
+    const crypto = String(body.crypto || '').toUpperCase()
+    const address = requireStaticText(body.address, 'Wallet address', 8, 180)
+
+    if (!cryptoOptions.some((option) => option.id === crypto)) throw new Error('Choose a supported cryptocurrency.')
+    if (account.wallet.balance < amount) throw new Error('Your wallet balance is too low for this withdrawal.')
+
+    account.wallet.balance -= amount
+    account.transactions = [createStaticTransaction('withdrawal', amount, crypto, null, address, 'Wallet withdrawal', 'Pending'), ...(account.transactions || [])]
+    writeStaticAuthState(state)
+    return { withdrawal: { amount, crypto, address, status: 'Pending' }, wallet: toPublicWallet(account), transactions: account.transactions }
+  }
+
+  throw new Error('API route not found.')
+}
+
+function readStaticAuthState() {
+  try {
+    const storedState = JSON.parse(window.localStorage.getItem(staticAuthStorageKey) || '{}')
+    const inviteCodes = new Set()
+    const walletIds = new Set()
+    const users = (Array.isArray(storedState.users) ? storedState.users : []).map((account, index) => normalizeStaticAccount(account, index, inviteCodes, walletIds))
+    const nextUserId = Number(storedState.nextUserId) || users.reduce((maxId, account) => Math.max(maxId, Number(account.id) || 0), 0) + 1
+    return { users, nextUserId, sessionEmail: storedState.sessionEmail || null }
+  } catch {
+    throw new Error('This browser cannot save demo accounts.')
+  }
+}
+
+function writeStaticAuthState(state) {
+  try {
+    window.localStorage.setItem(staticAuthStorageKey, JSON.stringify(state))
+  } catch {
+    throw new Error('This browser cannot save demo accounts.')
+  }
+}
+
+function getStaticSessionAccount(state) {
+  return state.sessionEmail ? state.users.find((account) => account.email === state.sessionEmail) : null
+}
+
+function toPublicUser(account) {
+  return { id: account.id, name: account.name, email: account.email, verified: Boolean(account.verified), inviteCode: account.inviteCode }
+}
+
+function toPublicWallet(account) {
+  return { id: account.wallet.id, balance: Number(account.wallet.balance) || 0 }
+}
+
+function toStaticAccountPayload(account, state) {
+  return {
+    user: toPublicUser(account),
+    wallet: toPublicWallet(account),
+    purchases: account.purchases || [],
+    transactions: account.transactions || [],
+    referrals: getStaticReferrals(state, account.id),
+  }
+}
+
+function getStaticReferrals(state, userId) {
+  return state.users.filter((account) => account.referredByUserId === userId).map((account) => ({
+    id: account.id,
+    name: account.name,
+    email: account.email,
+    createdAt: account.createdAt,
+  }))
+}
+
+function normalizeStaticAccount(account, index, inviteCodes, walletIds) {
+  const id = Number(account.id) || index + 1
+  let inviteCode = normalizeStaticInviteCode(account.inviteCode)
+  if (!inviteCode || inviteCode === defaultInviteCode || inviteCodes.has(inviteCode)) inviteCode = createStaticInviteCode(id, inviteCodes)
+  inviteCodes.add(inviteCode)
+
+  const storedWallet = account.wallet && typeof account.wallet === 'object' ? account.wallet : {}
+  let walletId = normalizeStaticWalletId(storedWallet.id || account.walletId)
+  if (!walletId || walletIds.has(walletId)) walletId = createStaticWalletId(id, walletIds)
+  walletIds.add(walletId)
+
+  return {
+    ...account,
+    id,
+    inviteCode,
+    wallet: { id: walletId, balance: Number(storedWallet.balance ?? account.walletBalance) || 0 },
+    purchases: Array.isArray(account.purchases) ? account.purchases : [],
+    transactions: Array.isArray(account.transactions) ? account.transactions : [],
+    referredByUserId: Number(account.referredByUserId) || null,
+    createdAt: account.createdAt || new Date().toISOString(),
+  }
+}
+
+function normalizeStaticEmail(value) {
+  const email = String(value || '').trim().toLowerCase()
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Enter a valid email address.')
+  return email
+}
+
+function normalizeStaticInviteCode(value) {
+  return String(value || '').trim().toUpperCase().replace(/\s+/g, '')
+}
+
+function requireStaticInviteCode(value, state) {
+  const inviteCode = normalizeStaticInviteCode(value)
+  if (!inviteCode) throw new Error('Invite code is required to create an account.')
+  const inviter = state.users.find((account) => account.inviteCode === inviteCode)
+  if (inviter) return { inviteCode, inviterId: inviter.id }
+  if (inviteCode === defaultInviteCode && state.users.length === 0) return { inviteCode, inviterId: null }
+  throw new Error('Invite code is invalid.')
+}
+
+function createStaticInviteCode(seed, existingCodes) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const code = `SEZ${String(seed).padStart(3, '0')}${Math.random().toString(36).slice(2, 5).toUpperCase()}`
+    if (!existingCodes.has(code) && code !== defaultInviteCode) return code
+  }
+  throw new Error('Unable to create a unique invite code.')
+}
+
+function createStaticWalletId(seed, existingIds) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const walletId = `WAL${String(seed).padStart(3, '0')}${Math.random().toString(36).slice(2, 6).toUpperCase()}`
+    if (!existingIds.has(walletId)) return walletId
+  }
+  throw new Error('Unable to create a unique wallet.')
+}
+
+function createStaticTransaction(type, amount, crypto, network, address, memo, status) {
+  return { type, amount, crypto, network, address, memo, status, createdAt: new Date().toISOString() }
+}
+
+function normalizeStaticWalletId(value) {
+  return String(value || '').trim().toUpperCase().replace(/\s+/g, '')
+}
+
+function requireStaticVerifiedAccount(account) {
+  if (!account.verified) throw new Error(verificationRequiredMessage)
+}
+
+function requireStaticAmount(value) {
+  const amount = Number(value)
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter a valid recharge amount.')
+  return amount
+}
+
+function requireStaticText(value, label, minLength, maxLength) {
+  const text = String(value || '').trim()
+  if (text.length < minLength || text.length > maxLength) throw new Error(`${label} must be between ${minLength} and ${maxLength} characters.`)
+  return text
+}
+
+function requireStaticPassword(value) {
+  const password = String(value || '')
+  if (password.length < 8 || password.length > 256) throw new Error('Password must be at least 8 characters.')
+  return password
 }
 
 function Icon({ name }) {
@@ -613,6 +1060,7 @@ function Icon({ name }) {
     trend: <><path d="m4 16 6-6 4 4 6-7" /><path d="M15 7h5v5" /></>,
     check: <><circle cx="12" cy="12" r="8" /><path d="m8.5 12 2.2 2.2 4.8-5" /></>,
     send: <><path d="m21 3-7.5 18-3.3-7.2L3 10.5z" /><path d="m10.2 13.8 4.3-4.3" /></>,
+    copy: <><rect x="8" y="8" width="10" height="12" rx="2" /><path d="M6 16H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1" /></>,
     shield: <><path d="M12 3 5 6v5c0 4.7 2.9 8.2 7 10 4.1-1.8 7-5.3 7-10V6z" /><path d="m9.3 12 1.8 1.8 3.8-4" /></>,
     bell: <><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></>,
     chevron: <path d="m9 5 7 7-7 7" />,

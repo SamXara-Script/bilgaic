@@ -1,4 +1,5 @@
 {
+  "homepage": "https://SamXara-Script.github.io/bilgaic",
   "name": "pyramida",
   "private": true,
   "version": "0.0.0",
@@ -9,7 +10,9 @@
     "start": "node server.js",
     "build": "vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d dist"
   },
   "dependencies": {
     "git": "^0.1.5",

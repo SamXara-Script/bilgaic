@@ -8,6 +8,10 @@ const port = Number(process.env.PORT || 8787)
 const dataDir = resolve('data')
 const distDir = resolve('dist')
 const sessionLifetime = 7 * 24 * 60 * 60 * 1000
+const defaultInviteCode = 'SEZ2026'
+const configuredInviteCodes = process.env.INVITE_CODES
+const bootstrapInviteCodes = new Set(String(configuredInviteCodes || defaultInviteCode).split(',').map(normalizeInviteCodeValue).filter(Boolean))
+const hasConfiguredInviteCodes = Boolean(configuredInviteCodes)
 
 const tierAmounts = [40, 90, 140, 200, 300, 500, 700, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000]
 const tierIds = ['starter', 'premium', 'elite', 'royal']
@@ -17,6 +21,7 @@ const tierCatalog = Object.fromEntries(tierAmounts.map((amount, index) => {
 }))
 
 const allowedCryptos = new Set(['USDT', 'BTC', 'ETH'])
+const allowedNetworks = new Set(['TRC20', 'ERC20', 'BEP20'])
 const mimeTypes = {
   '.css': 'text/css; charset=utf-8',
   '.html': 'text/html; charset=utf-8',
@@ -38,6 +43,12 @@ db.exec(`
     email TEXT NOT NULL UNIQUE,
     password_salt TEXT NOT NULL,
     password_hash TEXT NOT NULL,
+    verified INTEGER NOT NULL DEFAULT 0,
+    invite_code TEXT UNIQUE,
+    registration_invite_code TEXT,
+    referred_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    wallet_id TEXT UNIQUE,
+    wallet_balance REAL NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -59,20 +70,59 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id, tier_id)
   );
+
+  CREATE TABLE IF NOT EXISTS wallet_transactions (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    amount REAL NOT NULL,
+    crypto TEXT,
+    network TEXT,
+    address TEXT,
+    memo TEXT,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+`)
+
+ensureColumn('users', 'verified', 'verified INTEGER NOT NULL DEFAULT 0')
+ensureColumn('users', 'invite_code', 'invite_code TEXT')
+ensureColumn('users', 'registration_invite_code', 'registration_invite_code TEXT')
+ensureColumn('users', 'referred_by_user_id', 'referred_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL')
+ensureColumn('users', 'wallet_id', 'wallet_id TEXT')
+ensureColumn('users', 'wallet_balance', 'wallet_balance REAL NOT NULL DEFAULT 0')
+migrateUserAccounts()
+db.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS users_invite_code_unique ON users(invite_code);
+  CREATE UNIQUE INDEX IF NOT EXISTS users_wallet_id_unique ON users(wallet_id);
 `)
 
 const queries = {
   deleteExpiredSessions: db.prepare('DELETE FROM sessions WHERE expires_at <= ?'),
-  findUserByEmail: db.prepare('SELECT id, name, email, password_salt AS passwordSalt, password_hash AS passwordHash FROM users WHERE email = ?'),
-  findUserById: db.prepare('SELECT id, name, email, password_salt AS passwordSalt, password_hash AS passwordHash FROM users WHERE id = ?'),
-  createUser: db.prepare('INSERT INTO users (name, email, password_salt, password_hash) VALUES (?, ?, ?, ?)'),
+  countUsers: db.prepare('SELECT COUNT(*) AS count FROM users'),
+  findUserByEmail: db.prepare(`
+    SELECT id, name, email, verified, invite_code AS inviteCode, wallet_id AS walletId, wallet_balance AS walletBalance, password_salt AS passwordSalt, password_hash AS passwordHash
+    FROM users
+    WHERE email = ?
+  `),
+  findUserById: db.prepare(`
+    SELECT id, name, email, verified, invite_code AS inviteCode, wallet_id AS walletId, wallet_balance AS walletBalance, password_salt AS passwordSalt, password_hash AS passwordHash
+    FROM users
+    WHERE id = ?
+  `),
+  findUserByInviteCode: db.prepare('SELECT id, name, email, invite_code AS inviteCode FROM users WHERE invite_code = ?'),
+  createUser: db.prepare(`
+    INSERT INTO users (name, email, password_salt, password_hash, verified, invite_code, registration_invite_code, referred_by_user_id, wallet_id, wallet_balance)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `),
   updateUserProfile: db.prepare('UPDATE users SET name = ?, email = ? WHERE id = ?'),
   updatePassword: db.prepare('UPDATE users SET password_salt = ?, password_hash = ? WHERE id = ?'),
+  updateWalletBalance: db.prepare('UPDATE users SET wallet_balance = wallet_balance + ? WHERE id = ?'),
   createSession: db.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)'),
   deleteSession: db.prepare('DELETE FROM sessions WHERE token = ?'),
   deleteOtherSessions: db.prepare('DELETE FROM sessions WHERE user_id = ? AND token <> ?'),
   findSessionUser: db.prepare(`
-    SELECT users.id, users.name, users.email
+    SELECT users.id, users.name, users.email, users.verified, users.invite_code AS inviteCode, users.wallet_id AS walletId, users.wallet_balance AS walletBalance
     FROM sessions
     JOIN users ON users.id = sessions.user_id
     WHERE sessions.token = ? AND sessions.expires_at > ?
@@ -86,6 +136,23 @@ const queries = {
   createPurchase: db.prepare(`
     INSERT INTO purchases (user_id, tier_id, tier_level, tier_title, amount, crypto)
     VALUES (?, ?, ?, ?, ?, ?)
+  `),
+  listReferrals: db.prepare(`
+    SELECT id, name, email, created_at AS createdAt
+    FROM users
+    WHERE referred_by_user_id = ?
+    ORDER BY id DESC
+  `),
+  listWalletTransactions: db.prepare(`
+    SELECT type, amount, crypto, network, address, memo, status, created_at AS createdAt
+    FROM wallet_transactions
+    WHERE user_id = ?
+    ORDER BY id DESC
+    LIMIT 40
+  `),
+  createWalletTransaction: db.prepare(`
+    INSERT INTO wallet_transactions (user_id, type, amount, crypto, network, address, memo, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `),
 }
 
@@ -116,14 +183,15 @@ async function handleApi(request, response, url) {
     const name = requireText(body.name, 'Name', 2, 80)
     const email = normalizeEmail(body.email)
     const password = requirePassword(body.password)
+    const invitation = requireInviteCode(body.inviteCode)
 
     if (queries.findUserByEmail.get(email)) throw httpError(409, 'An account already uses this email address.')
 
     const { salt, hash } = hashPassword(password)
-    const result = queries.createUser.run(name, email, salt, hash)
-    const user = { id: Number(result.lastInsertRowid), name, email }
+    const result = queries.createUser.run(name, email, salt, hash, 1, createInviteCode(), invitation.inviteCode, invitation.inviterId, createWalletId(), 0)
+    const user = queries.findUserById.get(Number(result.lastInsertRowid))
     const token = createSession(user.id)
-    sendJson(response, 201, { user, purchases: [] }, { 'Set-Cookie': sessionCookie(token) })
+    sendAccountPayload(response, 201, user, { 'Set-Cookie': sessionCookie(token) })
     return
   }
 
@@ -135,9 +203,9 @@ async function handleApi(request, response, url) {
 
     if (!record || !verifyPassword(password, record.passwordSalt, record.passwordHash)) throw httpError(401, 'Invalid email or password.')
 
-    const user = { id: record.id, name: record.name, email: record.email }
+    const user = toPublicUser(record)
     const token = createSession(user.id)
-    sendJson(response, 200, { user, purchases: queries.listPurchases.all(user.id) }, { 'Set-Cookie': sessionCookie(token) })
+    sendAccountPayload(response, 200, record, { 'Set-Cookie': sessionCookie(token) })
     return
   }
 
@@ -151,7 +219,12 @@ async function handleApi(request, response, url) {
   const user = requireUser(request)
 
   if (request.method === 'GET' && url.pathname === '/api/session') {
-    sendJson(response, 200, { user, purchases: queries.listPurchases.all(user.id) })
+    sendAccountPayload(response, 200, user)
+    return
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/referrals') {
+    sendJson(response, 200, { inviteCode: user.inviteCode, referrals: queries.listReferrals.all(user.id).map(toPublicReferral) })
     return
   }
 
@@ -164,7 +237,8 @@ async function handleApi(request, response, url) {
     if (existingUser && existingUser.id !== user.id) throw httpError(409, 'An account already uses this email address.')
 
     queries.updateUserProfile.run(name, email, user.id)
-    sendJson(response, 200, { user: { id: user.id, name, email } })
+    const record = queries.findUserById.get(user.id)
+    sendJson(response, 200, { user: toPublicUser(record) })
     return
   }
 
@@ -188,19 +262,80 @@ async function handleApi(request, response, url) {
 
   if (request.method === 'POST' && url.pathname === '/api/purchases') {
     const body = await readBody(request)
+    requireVerifiedUser(user)
     const tier = tierCatalog[body.tierId]
     const crypto = String(body.crypto || '').toUpperCase()
     if (!tier) throw httpError(400, 'Choose a valid investment tier.')
     if (!allowedCryptos.has(crypto)) throw httpError(400, 'Choose a supported cryptocurrency.')
 
     try {
-      queries.createPurchase.run(user.id, tier.id, tier.level, tier.title, tier.amount, crypto)
+      runInTransaction(() => {
+        const walletOwner = queries.findUserById.get(user.id)
+        if (!walletOwner || Number(walletOwner.walletBalance) < tier.amount) throw httpError(400, 'Recharge your wallet before buying this tier.')
+        queries.createPurchase.run(user.id, tier.id, tier.level, tier.title, tier.amount, crypto)
+        queries.updateWalletBalance.run(-tier.amount, user.id)
+        queries.createWalletTransaction.run(user.id, 'purchase', tier.amount, crypto, null, null, `${tier.level} ${tier.title}`, 'Completed')
+      })
     } catch (error) {
       if (String(error.message).includes('UNIQUE constraint failed')) throw httpError(409, 'This tier is already in your profile.')
       throw error
     }
 
-    sendJson(response, 201, { purchase: { tierId: tier.id, level: tier.level, title: tier.title, amount: tier.amount, crypto } })
+    const record = queries.findUserById.get(user.id)
+    sendJson(response, 201, {
+      purchase: { tierId: tier.id, level: tier.level, title: tier.title, amount: tier.amount, crypto },
+      wallet: toPublicWallet(record),
+      transactions: queries.listWalletTransactions.all(user.id).map(toPublicWalletTransaction),
+    })
+    return
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/recharges') {
+    const body = await readBody(request)
+    requireVerifiedUser(user)
+    const amount = requireAmount(body.amount)
+    const crypto = String(body.crypto || '').toUpperCase()
+    const network = String(body.network || '').trim().toUpperCase()
+
+    if (!allowedCryptos.has(crypto)) throw httpError(400, 'Choose a supported cryptocurrency.')
+    if (!allowedNetworks.has(network)) throw httpError(400, 'Choose a supported network.')
+
+    runInTransaction(() => {
+      queries.updateWalletBalance.run(amount, user.id)
+      queries.createWalletTransaction.run(user.id, 'recharge', amount, crypto, network, walletAddress(user, crypto, network), 'Wallet recharge', 'Credited')
+    })
+
+    const record = queries.findUserById.get(user.id)
+    sendJson(response, 201, {
+      recharge: { amount, crypto, network, status: 'Credited' },
+      wallet: toPublicWallet(record),
+      transactions: queries.listWalletTransactions.all(user.id).map(toPublicWalletTransaction),
+    })
+    return
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/withdrawals') {
+    const body = await readBody(request)
+    requireVerifiedUser(user)
+    const amount = requireAmount(body.amount)
+    const crypto = String(body.crypto || '').toUpperCase()
+    const address = requireText(body.address, 'Wallet address', 8, 180)
+
+    if (!allowedCryptos.has(crypto)) throw httpError(400, 'Choose a supported cryptocurrency.')
+
+    runInTransaction(() => {
+      const walletOwner = queries.findUserById.get(user.id)
+      if (!walletOwner || Number(walletOwner.walletBalance) < amount) throw httpError(400, 'Your wallet balance is too low for this withdrawal.')
+      queries.updateWalletBalance.run(-amount, user.id)
+      queries.createWalletTransaction.run(user.id, 'withdrawal', amount, crypto, null, address, 'Wallet withdrawal', 'Pending')
+    })
+
+    const record = queries.findUserById.get(user.id)
+    sendJson(response, 201, {
+      withdrawal: { amount, crypto, address, status: 'Pending' },
+      wallet: toPublicWallet(record),
+      transactions: queries.listWalletTransactions.all(user.id).map(toPublicWalletTransaction),
+    })
     return
   }
 
@@ -213,6 +348,10 @@ function requireUser(request) {
   const user = token ? queries.findSessionUser.get(token, Date.now()) : null
   if (!user) throw httpError(401, 'Please log in to continue.')
   return user
+}
+
+function requireVerifiedUser(user) {
+  if (!user.verified) throw httpError(403, 'Your account must be verified before you can add money or buy a tier.')
 }
 
 function createSession(userId) {
@@ -235,6 +374,30 @@ function normalizeEmail(value) {
   const email = String(value || '').trim().toLowerCase()
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw httpError(400, 'Enter a valid email address.')
   return email
+}
+
+function normalizeInviteCodeValue(value) {
+  return String(value || '').trim().toUpperCase().replace(/\s+/g, '')
+}
+
+function requireInviteCode(value) {
+  const inviteCode = normalizeInviteCodeValue(value)
+  if (!inviteCode) throw httpError(400, 'Invite code is required to create an account.')
+
+  const inviter = queries.findUserByInviteCode.get(inviteCode)
+  if (inviter) return { inviteCode, inviterId: inviter.id }
+
+  const userCount = Number(queries.countUsers.get().count) || 0
+  const bootstrapAllowed = bootstrapInviteCodes.has(inviteCode) && (hasConfiguredInviteCodes || userCount === 0)
+  if (bootstrapAllowed) return { inviteCode, inviterId: null }
+
+  throw httpError(403, 'Invite code is invalid.')
+}
+
+function requireAmount(value) {
+  const amount = Number(value)
+  if (!Number.isFinite(amount) || amount <= 0) throw httpError(400, 'Enter a valid recharge amount.')
+  return amount
 }
 
 function requireText(value, label, minLength, maxLength) {
@@ -270,6 +433,109 @@ function readCookies(request) {
       .filter(([name, value]) => name && value)
       .map(([name, value]) => [name, decodeURIComponent(value)]),
   )
+}
+
+function toPublicUser(record) {
+  return { id: record.id, name: record.name, email: record.email, verified: Boolean(record.verified), inviteCode: record.inviteCode }
+}
+
+function toPublicWallet(record) {
+  return { id: record.walletId, balance: Number(record.walletBalance) || 0 }
+}
+
+function toPublicReferral(record) {
+  return { id: record.id, name: record.name, email: record.email, createdAt: record.createdAt }
+}
+
+function toPublicWalletTransaction(record) {
+  return {
+    type: record.type,
+    amount: Number(record.amount) || 0,
+    crypto: record.crypto,
+    network: record.network,
+    address: record.address,
+    memo: record.memo,
+    status: record.status,
+    createdAt: record.createdAt,
+  }
+}
+
+function sendAccountPayload(response, status, record, extraHeaders = {}) {
+  sendJson(response, status, {
+    user: toPublicUser(record),
+    wallet: toPublicWallet(record),
+    purchases: queries.listPurchases.all(record.id),
+    transactions: queries.listWalletTransactions.all(record.id).map(toPublicWalletTransaction),
+    referrals: queries.listReferrals.all(record.id).map(toPublicReferral),
+  }, extraHeaders)
+}
+
+function walletAddress(record, crypto, network) {
+  return `SEZ-${record.walletId}-${crypto}-${network}`
+}
+
+function runInTransaction(callback) {
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    const result = callback()
+    db.exec('COMMIT')
+    return result
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
+}
+
+function migrateUserAccounts() {
+  const users = db.prepare('SELECT id, invite_code AS inviteCode, wallet_id AS walletId FROM users ORDER BY id').all()
+  const usedInviteCodes = new Set()
+  const usedWalletIds = new Set()
+  const updateUserAccount = db.prepare('UPDATE users SET invite_code = ?, wallet_id = ?, wallet_balance = COALESCE(wallet_balance, 0) WHERE id = ?')
+
+  for (const user of users) {
+    let inviteCode = normalizeInviteCodeValue(user.inviteCode)
+    if (!inviteCode || bootstrapInviteCodes.has(inviteCode) || usedInviteCodes.has(inviteCode)) inviteCode = createInviteCode(usedInviteCodes)
+    usedInviteCodes.add(inviteCode)
+
+    let walletId = normalizeWalletIdValue(user.walletId)
+    if (!walletId || usedWalletIds.has(walletId)) walletId = createWalletId(usedWalletIds)
+    usedWalletIds.add(walletId)
+
+    updateUserAccount.run(inviteCode, walletId, user.id)
+  }
+}
+
+function createInviteCode(existingCodes = readInviteCodes()) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const code = `SEZ${randomBytes(3).toString('hex').toUpperCase()}`
+    if (!existingCodes.has(code) && !bootstrapInviteCodes.has(code)) return code
+  }
+  throw new Error('Unable to create a unique invite code.')
+}
+
+function createWalletId(existingIds = readWalletIds()) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const walletId = `WAL${randomBytes(4).toString('hex').toUpperCase()}`
+    if (!existingIds.has(walletId)) return walletId
+  }
+  throw new Error('Unable to create a unique wallet.')
+}
+
+function readInviteCodes() {
+  return new Set(db.prepare('SELECT invite_code AS inviteCode FROM users WHERE invite_code IS NOT NULL').all().map((row) => normalizeInviteCodeValue(row.inviteCode)).filter(Boolean))
+}
+
+function readWalletIds() {
+  return new Set(db.prepare('SELECT wallet_id AS walletId FROM users WHERE wallet_id IS NOT NULL').all().map((row) => normalizeWalletIdValue(row.walletId)).filter(Boolean))
+}
+
+function normalizeWalletIdValue(value) {
+  return String(value || '').trim().toUpperCase().replace(/\s+/g, '')
+}
+
+function ensureColumn(tableName, columnName, columnDefinition) {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all()
+  if (!columns.some((column) => column.name === columnName)) db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnDefinition}`)
 }
 
 function sessionCookie(token) {
