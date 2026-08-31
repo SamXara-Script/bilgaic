@@ -37,6 +37,7 @@ const cryptoOptions = [
 ]
 
 const projectedMonthlyRate = 0.24
+const withdrawalFeeRate = 0.16
 const referralTeams = [
   { level: 1, label: 'Team 1', taskRate: 0.06, depositRate: 0.03 },
   { level: 2, label: 'Team 2', taskRate: 0.03, depositRate: 0.02 },
@@ -250,7 +251,8 @@ function App() {
     const result = await requestApi('/api/withdrawals', { method: 'POST', body: { amount, crypto, address } })
     setWallet(toClientWallet(result.wallet))
     setTransactions((result.transactions || []).map(toClientTransaction))
-    showNotice(`Withdrawal request for ${formatMoney(amount)} submitted.`)
+    const withdrawal = result.withdrawal || { amount, fee: calculateWithdrawalFee(amount), receiveAmount: calculateWithdrawalReceiveAmount(amount) }
+    showNotice(`Withdrawal submitted. You receive ${formatMoney(withdrawal.receiveAmount)} after ${formatMoney(withdrawal.fee)} fee.`)
   }
 
   async function refreshReferrals() {
@@ -618,6 +620,8 @@ function WithdrawView({ onBack, onWithdraw, portfolio }) {
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const amountValue = Math.max(Number(amount) || 0, 0)
+  const withdrawalFee = calculateWithdrawalFee(amountValue)
+  const receiveAmount = calculateWithdrawalReceiveAmount(amountValue)
 
   async function submit(event) {
     event.preventDefault()
@@ -648,8 +652,8 @@ function WithdrawView({ onBack, onWithdraw, portfolio }) {
       </form>
       <section className="info-panel">
         <p className="eyebrow">Withdrawal summary</p>
-        <h2>{formatMoney(amountValue)}</h2>
-        <div className="result-strip"><Metric label="Available" value={formatMoney(portfolio.walletBalance)} /><Metric label="Monthly Profit" value={formatMoney(portfolio.earnings)} green /></div>
+        <h2>{formatMoney(receiveAmount)}</h2>
+        <div className="result-strip"><Metric label="Available" value={formatMoney(portfolio.walletBalance)} /><Metric label="Fee 16%" value={formatMoney(withdrawalFee)} /><Metric label="Wallet Debit" value={formatMoney(amountValue)} /><Metric label="You Receive" value={formatMoney(receiveAmount)} green /></div>
       </section>
     </div>
   </section>
@@ -803,6 +807,18 @@ function getTierProjection(amount, monthlyRate = projectedMonthlyRate) {
 function findTierPlanByAmount(amount) {
   const numericAmount = Number(amount) || 0
   return tierPlans.find((plan) => plan.amount === numericAmount || plan.amount - 1 === numericAmount)
+}
+
+function calculateWithdrawalFee(amount) {
+  return roundClientMoney((Number(amount) || 0) * withdrawalFeeRate)
+}
+
+function calculateWithdrawalReceiveAmount(amount) {
+  return Math.max(roundClientMoney((Number(amount) || 0) - calculateWithdrawalFee(amount)), 0)
+}
+
+function roundClientMoney(amount) {
+  return Math.round((amount + Number.EPSILON) * 100) / 100
 }
 
 function formatCompactMoney(amount) {
@@ -1055,10 +1071,12 @@ function handleStaticApi(path, options = {}) {
     if (!cryptoOptions.some((option) => option.id === crypto)) throw new Error('Choose a supported cryptocurrency.')
     if (account.wallet.balance < amount) throw new Error('Your wallet balance is too low for this withdrawal.')
 
+    const fee = calculateWithdrawalFee(amount)
+    const receiveAmount = calculateWithdrawalReceiveAmount(amount)
     account.wallet.balance -= amount
-    account.transactions = [createStaticTransaction('withdrawal', amount, crypto, null, address, 'Wallet withdrawal', 'Pending'), ...(account.transactions || [])]
+    account.transactions = [createStaticTransaction('withdrawal', amount, crypto, null, address, `Wallet withdrawal - 16% fee, ${formatMoney(receiveAmount)} sent`, 'Pending'), ...(account.transactions || [])]
     writeStaticAuthState(state)
-    return { withdrawal: { amount, crypto, address, status: 'Pending' }, wallet: toPublicWallet(account), transactions: account.transactions }
+    return { withdrawal: { amount, fee, receiveAmount, crypto, address, status: 'Pending' }, wallet: toPublicWallet(account), transactions: account.transactions }
   }
 
   throw new Error('API route not found.')

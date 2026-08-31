@@ -13,6 +13,7 @@ const configuredInviteCodes = process.env.INVITE_CODES
 const bootstrapInviteCodes = new Set(String(configuredInviteCodes || defaultInviteCode).split(',').map(normalizeInviteCodeValue).filter(Boolean))
 const hasConfiguredInviteCodes = Boolean(configuredInviteCodes)
 const projectedMonthlyRate = 0.24
+const withdrawalFeeRate = 0.16
 const referralTeams = [
   { level: 1, label: 'Team 1', taskRate: 0.06, depositRate: 0.03 },
   { level: 2, label: 'Team 2', taskRate: 0.03, depositRate: 0.02 },
@@ -430,17 +431,19 @@ async function handleApi(request, response, url) {
     const address = requireText(body.address, 'Wallet address', 8, 180)
 
     if (!allowedCryptos.has(crypto)) throw httpError(400, 'Choose a supported cryptocurrency.')
+    const fee = calculateWithdrawalFee(amount)
+    const receiveAmount = calculateWithdrawalReceiveAmount(amount)
 
     runInTransaction(() => {
       const walletOwner = queries.findUserById.get(user.id)
       if (!walletOwner || Number(walletOwner.walletBalance) < amount) throw httpError(400, 'Your wallet balance is too low for this withdrawal.')
       queries.updateWalletBalance.run(-amount, user.id)
-      queries.createWalletTransaction.run(user.id, 'withdrawal', amount, crypto, null, address, 'Wallet withdrawal', 'Pending')
+      queries.createWalletTransaction.run(user.id, 'withdrawal', amount, crypto, null, address, `Wallet withdrawal - 16% fee, ${formatServerMoney(receiveAmount)} sent`, 'Pending')
     })
 
     const record = queries.findUserById.get(user.id)
     sendJson(response, 201, {
-      withdrawal: { amount, crypto, address, status: 'Pending' },
+      withdrawal: { amount, fee, receiveAmount, crypto, address, status: 'Pending' },
       wallet: toPublicWallet(record),
       transactions: queries.listWalletTransactions.all(user.id).map(toPublicWalletTransaction),
     })
@@ -648,6 +651,14 @@ function findTierPlanByAmount(amount) {
   return tierPlans.find((plan) => plan.amount === numericAmount || plan.amount - 1 === numericAmount)
 }
 
+function calculateWithdrawalFee(amount) {
+  return roundMoney((Number(amount) || 0) * withdrawalFeeRate)
+}
+
+function calculateWithdrawalReceiveAmount(amount) {
+  return Math.max(roundMoney((Number(amount) || 0) - calculateWithdrawalFee(amount)), 0)
+}
+
 function calculateDailyVipIncome(amount) {
   const numericAmount = Number(amount) || 0
   const plan = findTierPlanByAmount(numericAmount)
@@ -656,6 +667,10 @@ function calculateDailyVipIncome(amount) {
 
 function roundMoney(amount) {
   return Math.round((amount + Number.EPSILON) * 100) / 100
+}
+
+function formatServerMoney(amount) {
+  return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 function parseUtcDate(value) {
