@@ -38,23 +38,23 @@ const cryptoOptions = [
 
 const projectedMonthlyRate = 0.24
 const referralTeams = [
-  { level: 1, label: 'Team 1', taskRate: 0.03, depositRate: 0.06 },
-  { level: 2, label: 'Team 2', taskRate: 0.02, depositRate: 0.03 },
-  { level: 3, label: 'Team 3', taskRate: 0.01, depositRate: 0.02 },
+  { level: 1, label: 'Team 1', taskRate: 0.06, depositRate: 0.03 },
+  { level: 2, label: 'Team 2', taskRate: 0.03, depositRate: 0.02 },
+  { level: 3, label: 'Team 3', taskRate: 0.02, depositRate: 0.01 },
 ]
 const tierPlans = [
-  { amount: 299, dailyIncome: 18.5 },
-  { amount: 499, dailyIncome: 31 },
-  { amount: 999, dailyIncome: 60.5 },
-  { amount: 1299, dailyIncome: 78 },
-  { amount: 1499, dailyIncome: 89.5 },
-  { amount: 1999, dailyIncome: 119 },
-  { amount: 2999, dailyIncome: 180 },
-  { amount: 4999, dailyIncome: 300 },
-  { amount: 9999, dailyIncome: 670 },
-  { amount: 19999, dailyIncome: 1350 },
-  { amount: 29999, dailyIncome: 1840 },
-  { amount: 49999, dailyIncome: 3230 },
+  { amount: 300, dailyIncome: 17.5 },
+  { amount: 500, dailyIncome: 30 },
+  { amount: 1000, dailyIncome: 59.5 },
+  { amount: 1300, dailyIncome: 77 },
+  { amount: 1500, dailyIncome: 88.5 },
+  { amount: 2000, dailyIncome: 118 },
+  { amount: 3000, dailyIncome: 179 },
+  { amount: 5000, dailyIncome: 299 },
+  { amount: 10000, dailyIncome: 669 },
+  { amount: 20000, dailyIncome: 1349 },
+  { amount: 30000, dailyIncome: 1839 },
+  { amount: 50000, dailyIncome: 3229 },
 ]
 const tierIds = ['starter', 'premium', 'elite', 'royal']
 const tierColors = [
@@ -86,9 +86,9 @@ const tiers = tierPlans.map(({ amount: price, dailyIncome }, index) => {
 
 const tierFilters = [
   { id: 'all', label: 'All Tiers', matches: () => true },
-  { id: 'entry', label: '$299-$1,499', matches: (tier) => tier.price <= 1499 },
-  { id: 'growth', label: '$1,999-$4,999', matches: (tier) => tier.price >= 1999 && tier.price <= 4999 },
-  { id: 'pro', label: '$9,999-$49,999', matches: (tier) => tier.price >= 9999 },
+  { id: 'entry', label: '$300-$1,500', matches: (tier) => tier.price <= 1500 },
+  { id: 'growth', label: '$2,000-$5,000', matches: (tier) => tier.price >= 2000 && tier.price <= 5000 },
+  { id: 'pro', label: '$10,000-$50,000', matches: (tier) => tier.price >= 10000 },
 ]
 
 const staticAuthStorageKey = 'sez-demo-auth'
@@ -569,7 +569,7 @@ function CheckoutView({ tier, crypto, wallet, onCrypto, onBack, onConfirm }) {
 }
 
 function RechargeView({ wallet, onBack, onRecharge }) {
-  const [amount, setAmount] = useState('299')
+  const [amount, setAmount] = useState('300')
   const [crypto, setCrypto] = useState('USDT')
   const [network, setNetwork] = useState('TRC20')
   const [error, setError] = useState('')
@@ -802,7 +802,7 @@ function getTierProjection(amount, monthlyRate = projectedMonthlyRate) {
 
 function findTierPlanByAmount(amount) {
   const numericAmount = Number(amount) || 0
-  return tierPlans.find((plan) => plan.amount === numericAmount || plan.amount + 1 === numericAmount)
+  return tierPlans.find((plan) => plan.amount === numericAmount || plan.amount - 1 === numericAmount)
 }
 
 function formatCompactMoney(amount) {

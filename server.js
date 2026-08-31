@@ -14,26 +14,26 @@ const bootstrapInviteCodes = new Set(String(configuredInviteCodes || defaultInvi
 const hasConfiguredInviteCodes = Boolean(configuredInviteCodes)
 const projectedMonthlyRate = 0.24
 const referralTeams = [
-  { level: 1, label: 'Team 1', taskRate: 0.03, depositRate: 0.06 },
-  { level: 2, label: 'Team 2', taskRate: 0.02, depositRate: 0.03 },
-  { level: 3, label: 'Team 3', taskRate: 0.01, depositRate: 0.02 },
+  { level: 1, label: 'Team 1', taskRate: 0.06, depositRate: 0.03 },
+  { level: 2, label: 'Team 2', taskRate: 0.03, depositRate: 0.02 },
+  { level: 3, label: 'Team 3', taskRate: 0.02, depositRate: 0.01 },
 ]
 const maxJsonBodySize = 8 * 1024 * 1024
 const maxUploadBytes = 3 * 1024 * 1024
 
 const tierPlans = [
-  { amount: 299, dailyIncome: 18.5 },
-  { amount: 499, dailyIncome: 31 },
-  { amount: 999, dailyIncome: 60.5 },
-  { amount: 1299, dailyIncome: 78 },
-  { amount: 1499, dailyIncome: 89.5 },
-  { amount: 1999, dailyIncome: 119 },
-  { amount: 2999, dailyIncome: 180 },
-  { amount: 4999, dailyIncome: 300 },
-  { amount: 9999, dailyIncome: 670 },
-  { amount: 19999, dailyIncome: 1350 },
-  { amount: 29999, dailyIncome: 1840 },
-  { amount: 49999, dailyIncome: 3230 },
+  { amount: 300, dailyIncome: 17.5 },
+  { amount: 500, dailyIncome: 30 },
+  { amount: 1000, dailyIncome: 59.5 },
+  { amount: 1300, dailyIncome: 77 },
+  { amount: 1500, dailyIncome: 88.5 },
+  { amount: 2000, dailyIncome: 118 },
+  { amount: 3000, dailyIncome: 179 },
+  { amount: 5000, dailyIncome: 299 },
+  { amount: 10000, dailyIncome: 669 },
+  { amount: 20000, dailyIncome: 1349 },
+  { amount: 30000, dailyIncome: 1839 },
+  { amount: 50000, dailyIncome: 3229 },
 ]
 const tierIds = ['starter', 'premium', 'elite', 'royal']
 const tierCatalog = Object.fromEntries(tierPlans.map(({ amount, dailyIncome }, index) => {
@@ -645,7 +645,7 @@ function creditReferralCommissions(sourceUserId, amount, crypto, kind) {
 
 function findTierPlanByAmount(amount) {
   const numericAmount = Number(amount) || 0
-  return tierPlans.find((plan) => plan.amount === numericAmount || plan.amount + 1 === numericAmount)
+  return tierPlans.find((plan) => plan.amount === numericAmount || plan.amount - 1 === numericAmount)
 }
 
 function calculateDailyVipIncome(amount) {
