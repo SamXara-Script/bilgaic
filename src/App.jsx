@@ -37,7 +37,25 @@ const cryptoOptions = [
 ]
 
 const projectedMonthlyRate = 0.24
-const tierAmounts = [40, 90, 140, 200, 300, 500, 700, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000]
+const referralTeams = [
+  { level: 1, label: 'Team 1', taskRate: 0.03, depositRate: 0.06 },
+  { level: 2, label: 'Team 2', taskRate: 0.02, depositRate: 0.03 },
+  { level: 3, label: 'Team 3', taskRate: 0.01, depositRate: 0.02 },
+]
+const tierPlans = [
+  { amount: 299, dailyIncome: 18.5 },
+  { amount: 499, dailyIncome: 31 },
+  { amount: 999, dailyIncome: 60.5 },
+  { amount: 1299, dailyIncome: 78 },
+  { amount: 1499, dailyIncome: 89.5 },
+  { amount: 1999, dailyIncome: 119 },
+  { amount: 2999, dailyIncome: 180 },
+  { amount: 4999, dailyIncome: 300 },
+  { amount: 9999, dailyIncome: 670 },
+  { amount: 19999, dailyIncome: 1350 },
+  { amount: 29999, dailyIncome: 1840 },
+  { amount: 49999, dailyIncome: 3230 },
+]
 const tierIds = ['starter', 'premium', 'elite', 'royal']
 const tierColors = [
   ['#4b91ff', 'rgba(36, 113, 255, .32)'],
@@ -46,19 +64,21 @@ const tierColors = [
   ['#1fddb0', 'rgba(24, 203, 157, .26)'],
 ]
 
-const tiers = tierAmounts.map((price, index) => {
+const maxTierDailyIncome = Math.max(...tierPlans.map((plan) => plan.dailyIncome))
+const tiers = tierPlans.map(({ amount: price, dailyIncome }, index) => {
   const [color, shadow] = tierColors[index % tierColors.length]
-  const ratePercent = Math.round(projectedMonthlyRate * 100)
+  const monthlyProfit = dailyIncome * 30
 
   return {
     id: tierIds[index] || `vip-${index + 1}`,
     level: `VIP ${index + 1}`,
     title: `Sez VIP ${index + 1}`,
     price,
+    dailyIncome,
     investment: formatCompactMoney(price),
-    risk: `${ratePercent}% monthly`,
-    riskValue: ratePercent,
-    monthlyRate: projectedMonthlyRate,
+    risk: `Daily ${formatMoney(dailyIncome)}`,
+    riskValue: Math.max(8, Math.round((dailyIncome / maxTierDailyIncome) * 100)),
+    monthlyRate: monthlyProfit / price,
     color,
     shadow,
   }
@@ -66,9 +86,9 @@ const tiers = tierAmounts.map((price, index) => {
 
 const tierFilters = [
   { id: 'all', label: 'All Tiers', matches: () => true },
-  { id: 'entry', label: '$40-$300', matches: (tier) => tier.price <= 300 },
-  { id: 'growth', label: '$500-$1,500', matches: (tier) => tier.price >= 500 && tier.price <= 1500 },
-  { id: 'pro', label: '$2,000-$5,000', matches: (tier) => tier.price >= 2000 },
+  { id: 'entry', label: '$299-$1,499', matches: (tier) => tier.price <= 1499 },
+  { id: 'growth', label: '$1,999-$4,999', matches: (tier) => tier.price >= 1999 && tier.price <= 4999 },
+  { id: 'pro', label: '$9,999-$49,999', matches: (tier) => tier.price >= 9999 },
 ]
 
 const staticAuthStorageKey = 'sez-demo-auth'
@@ -462,6 +482,7 @@ function ProfileView({ onAction, onProfileSettings, onSecurity, onReferrals, onV
 
 function ReferralView({ user, referrals, onCopy, onRefresh }) {
   const [refreshing, setRefreshing] = useState(false)
+  const teamCounts = referralTeams.map((team) => ({ ...team, count: referrals.filter((referral) => Number(referral.level || 1) === team.level).length }))
 
   async function refresh() {
     setRefreshing(true)
@@ -483,11 +504,14 @@ function ReferralView({ user, referrals, onCopy, onRefresh }) {
         <button type="button" onClick={onCopy}><Icon name="copy" />Copy</button>
       </section>
       <section className="referral-grid">
-        <Metric label="Invited Customers" value={String(referrals.length)} />
+        <Metric label="Team Members" value={String(referrals.length)} />
         <Metric label="Invite Status" value="Active" green />
       </section>
+      <section className="referral-commissions" aria-label="Referral commission rates">
+        {teamCounts.map((team) => <article className="commission-row" key={team.level}><strong>{team.label}</strong><span>{team.count} members</span><small>Task {formatPercent(team.taskRate)} / Deposit {formatPercent(team.depositRate)}</small></article>)}
+      </section>
       <section className="purchased-panel referral-panel">
-        <SectionHeader title="Invited Customers" action={refreshing ? 'Refreshing...' : 'Refresh'} onAction={refresh} />
+        <SectionHeader title="Referral Team" action={refreshing ? 'Refreshing...' : 'Refresh'} onAction={refresh} />
         <ReferralList referrals={referrals} />
       </section>
     </>
@@ -495,8 +519,8 @@ function ReferralView({ user, referrals, onCopy, onRefresh }) {
 }
 
 function ReferralList({ referrals }) {
-  if (!referrals.length) return <div className="empty-state purchased-empty"><Icon name="send" /><p>No invited customers yet</p></div>
-  return <div className="referral-list">{referrals.map((referral) => <article className="referral-row" key={referral.id}><div><h3>{referral.name}</h3><p>{referral.email}</p></div><span>{formatShortDate(referral.createdAt)}</span></article>)}</div>
+  if (!referrals.length) return <div className="empty-state purchased-empty"><Icon name="send" /><p>No team members yet</p></div>
+  return <div className="referral-list">{referrals.map((referral) => <article className="referral-row" key={referral.id}><div><span className="team-tag">{referral.team || `Team ${referral.level || 1}`}</span><h3>{referral.name}</h3><p>{referral.email}</p></div><div className="referral-meta"><strong>{formatShortDate(referral.createdAt)}</strong><small>Task {formatPercent(referral.taskRate)} / Deposit {formatPercent(referral.depositRate)}</small></div></article>)}</div>
 }
 
 function TierCard({ tier, owned, onInvest, onProfile }) {
@@ -508,7 +532,7 @@ function TierCard({ tier, owned, onInvest, onProfile }) {
         <div><span className="vip-pill"><span />{tier.level}</span><h2>{tier.title}</h2></div>
         <div className="tier-price"><p className="micro-label">Invest</p><strong>{tier.investment}</strong></div>
       </div>
-      <div className="risk-row"><span className="micro-label">Monthly Rate</span><strong>{tier.risk}</strong></div>
+      <div className="risk-row"><span className="micro-label">Daily Payout</span><strong>{tier.risk}</strong></div>
       <div className="risk-track"><span style={{ width: `${tier.riskValue}%` }} /></div>
       <div className="tier-stats"><Metric label="Daily Income" value={formatMoney(projection.dailyIncome)} /><Metric label="Weekly Income" value={formatMoney(projection.weeklyIncome)} /><Metric label="1 Month Result" value={formatMoney(projection.monthResult)} /></div>
       <PrimaryButton label={owned ? 'View Profile' : 'Invest Now'} onClick={() => owned ? onProfile() : onInvest(tier)} />
@@ -538,14 +562,14 @@ function CheckoutView({ tier, crypto, wallet, onCrypto, onBack, onConfirm }) {
   return <section className="checkout-page" style={{ '--accent': tier.color, '--accent-shadow': tier.shadow }}>
     <button className="checkout-back" type="button" onClick={onBack}><Icon name="arrow-left" />Back to tiers</button>
     <div className="checkout-grid">
-      <div className="checkout-intro"><p className="eyebrow">Customer purchase</p><h1>Buy {tier.title}</h1><p>Choose a cryptocurrency to complete your investment purchase.</p><div className="checkout-product"><span className="vip-pill"><span />{tier.level}</span><h2>{tier.title}</h2><strong>{formatMoney(tier.price)}</strong><div className="risk-row"><span className="micro-label">Monthly Rate</span><strong>{tier.risk}</strong></div><div className="risk-track"><span style={{ width: `${tier.riskValue}%` }} /></div></div></div>
+      <div className="checkout-intro"><p className="eyebrow">Customer purchase</p><h1>Buy {tier.title}</h1><p>Choose a cryptocurrency to complete your investment purchase.</p><div className="checkout-product"><span className="vip-pill"><span />{tier.level}</span><h2>{tier.title}</h2><strong>{formatMoney(tier.price)}</strong><div className="risk-row"><span className="micro-label">Daily Payout</span><strong>{tier.risk}</strong></div><div className="risk-track"><span style={{ width: `${tier.riskValue}%` }} /></div></div></div>
       <div className="checkout-payment"><p className="eyebrow">Wallet payment</p><h2>Select cryptocurrency</h2><div className="crypto-options">{cryptoOptions.map((option) => <button key={option.id} className={crypto === option.id ? 'active' : ''} type="button" onClick={() => onCrypto(option.id)}><span className={`crypto-mark ${option.tone}`}>{option.id.slice(0, 1)}</span><span><strong>{option.id}</strong><small>{option.name}</small></span><Icon name="check" /></button>)}</div><div className="payment-total"><span>Amount due</span><strong>{selectedOption.quantity(tier.price)}</strong><small>{formatMoney(tier.price)} from wallet {wallet.id}</small></div><PrimaryButton label="Confirm Wallet Payment" icon="check" onClick={onConfirm} /><p className="payment-note">Your wallet balance must cover this tier before purchase.</p></div>
     </div>
   </section>
 }
 
 function RechargeView({ wallet, onBack, onRecharge }) {
-  const [amount, setAmount] = useState('40')
+  const [amount, setAmount] = useState('299')
   const [crypto, setCrypto] = useState('USDT')
   const [network, setNetwork] = useState('TRC20')
   const [error, setError] = useState('')
@@ -768,10 +792,17 @@ function getOverviewItems(portfolio) {
 }
 
 function getTierProjection(amount, monthlyRate = projectedMonthlyRate) {
-  const monthlyProfit = amount * monthlyRate
-  const dailyIncome = monthlyProfit / 30
+  const numericAmount = Number(amount) || 0
+  const plan = findTierPlanByAmount(numericAmount)
+  const dailyIncome = plan ? plan.dailyIncome : numericAmount * monthlyRate / 30
+  const monthlyProfit = plan ? dailyIncome * 30 : numericAmount * monthlyRate
   const weeklyIncome = dailyIncome * 7
-  return { dailyIncome, weeklyIncome, monthlyProfit, monthResult: amount + monthlyProfit }
+  return { dailyIncome, weeklyIncome, monthlyProfit, monthResult: numericAmount + monthlyProfit }
+}
+
+function findTierPlanByAmount(amount) {
+  const numericAmount = Number(amount) || 0
+  return tierPlans.find((plan) => plan.amount === numericAmount || plan.amount + 1 === numericAmount)
 }
 
 function formatCompactMoney(amount) {
@@ -780,6 +811,10 @@ function formatCompactMoney(amount) {
 
 function formatMoney(amount) {
   return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+function formatPercent(rate) {
+  return `${Math.round((Number(rate) || 0) * 100)}%`
 }
 
 function toClientPurchase(purchase) {
@@ -798,8 +833,8 @@ function toClientTransaction(transaction) {
 }
 
 function toActivity(transaction) {
-  const isCredit = transaction.type === 'recharge' || transaction.type === 'earning'
-  const title = transaction.memo || (transaction.type === 'earning' ? 'VIP daily income' : isCredit ? 'Wallet recharge' : transaction.type === 'purchase' ? 'Tier purchase' : 'Wallet withdrawal')
+  const isCredit = ['recharge', 'earning', 'referral_deposit', 'referral_task'].includes(transaction.type)
+  const title = transaction.memo || (transaction.type === 'earning' ? 'VIP daily income' : transaction.type === 'referral_deposit' ? 'Referral deposit commission' : transaction.type === 'referral_task' ? 'Referral task commission' : isCredit ? 'Wallet recharge' : transaction.type === 'purchase' ? 'Tier purchase' : 'Wallet withdrawal')
   const details = [transaction.status, transaction.crypto, transaction.network].filter(Boolean).join(' - ')
   return {
     title,
@@ -812,7 +847,8 @@ function toActivity(transaction) {
 
 function getTransactionTone(type) {
   if (type === 'recharge') return 'teal'
-  if (type === 'earning') return 'gold'
+  if (type === 'earning' || type === 'referral_task') return 'gold'
+  if (type === 'referral_deposit') return 'teal'
   if (type === 'withdrawal') return 'violet'
   return 'blue'
 }
@@ -1003,8 +1039,9 @@ function handleStaticApi(path, options = {}) {
     if (!cryptoOptions.some((option) => option.id === crypto)) throw new Error('Choose a supported cryptocurrency.')
     if (!['TRC20', 'ERC20', 'BEP20'].includes(network)) throw new Error('Choose a supported network.')
 
-    account.wallet.balance += amount
+    account.wallet.balance = roundStaticMoney((Number(account.wallet.balance) || 0) + amount)
     account.transactions = [createStaticTransaction('recharge', amount, crypto, network, `SEZ-${account.wallet.id}-${crypto}-${network}`, 'Wallet recharge', 'Credited'), ...(account.transactions || [])]
+    creditStaticReferralCommissions(state, account.id, amount, crypto, 'deposit')
     writeStaticAuthState(state)
     return { recharge: { amount, crypto, network, status: 'Credited' }, wallet: toPublicWallet(account), transactions: account.transactions }
   }
@@ -1037,7 +1074,7 @@ function readStaticAuthState() {
     const state = { users, nextUserId, sessionEmail: storedState.sessionEmail || null }
     let hasVipChanges = false
     for (const account of users) {
-      if (syncStaticVipEarnings(account)) hasVipChanges = true
+      if (syncStaticVipEarnings(state, account)) hasVipChanges = true
     }
     if (hasVipChanges) window.localStorage.setItem(staticAuthStorageKey, JSON.stringify(state))
     return state
@@ -1078,16 +1115,84 @@ function toStaticAccountPayload(account, state) {
 }
 
 function getStaticReferrals(state, userId) {
+  const referrals = []
+  const seen = new Set([userId])
+  let currentTeamUserIds = [userId]
+
+  for (const team of referralTeams) {
+    const nextTeamUserIds = []
+    for (const teamUserId of currentTeamUserIds) {
+      for (const account of getStaticDirectReferrals(state, teamUserId)) {
+        if (seen.has(account.id)) continue
+
+        seen.add(account.id)
+        nextTeamUserIds.push(account.id)
+        referrals.push({
+          id: account.id,
+          name: account.name,
+          email: account.email,
+          createdAt: account.createdAt,
+          level: team.level,
+          team: team.label,
+          taskRate: team.taskRate,
+          depositRate: team.depositRate,
+        })
+      }
+    }
+    currentTeamUserIds = nextTeamUserIds
+  }
+
+  return referrals
+}
+
+function getStaticDirectReferrals(state, userId) {
   const owner = state.users.find((account) => account.id === userId)
   const ownerInviteCode = normalizeStaticInviteCode(owner?.inviteCode)
   return state.users.filter((account) => account.id !== userId && (
     account.referredByUserId === userId || (ownerInviteCode && normalizeStaticInviteCode(account.registeredWithCode) === ownerInviteCode)
-  )).map((account) => ({
-    id: account.id,
-    name: account.name,
-    email: account.email,
-    createdAt: account.createdAt,
-  }))
+  ))
+}
+
+function creditStaticReferralCommissions(state, sourceUserId, amount, crypto, kind) {
+  let childUserId = sourceUserId
+  const seen = new Set([sourceUserId])
+
+  for (const team of referralTeams) {
+    const parentId = getStaticReferralParentId(state, childUserId)
+    if (!parentId || seen.has(parentId)) break
+
+    seen.add(parentId)
+    childUserId = parentId
+
+    const parent = state.users.find((account) => account.id === parentId)
+    const rate = kind === 'deposit' ? team.depositRate : team.taskRate
+    const commission = roundStaticMoney(amount * rate)
+    if (!parent || commission <= 0) continue
+
+    parent.wallet.balance = roundStaticMoney((Number(parent.wallet.balance) || 0) + commission)
+    parent.transactions = [
+      createStaticTransaction(
+        kind === 'deposit' ? 'referral_deposit' : 'referral_task',
+        commission,
+        crypto,
+        null,
+        null,
+        `${team.label} ${kind === 'deposit' ? 'deposit' : 'task'} commission`,
+        'Credited',
+      ),
+      ...(Array.isArray(parent.transactions) ? parent.transactions : []),
+    ]
+  }
+}
+
+function getStaticReferralParentId(state, userId) {
+  const account = state.users.find((item) => item.id === userId)
+  if (!account) return null
+  if (account.referredByUserId && state.users.some((item) => item.id === account.referredByUserId)) return account.referredByUserId
+
+  const registeredWithCode = normalizeStaticInviteCode(account.registeredWithCode)
+  const parent = registeredWithCode ? state.users.find((item) => item.id !== userId && normalizeStaticInviteCode(item.inviteCode) === registeredWithCode) : null
+  return parent?.id || null
 }
 
 function normalizeStaticAccount(account, index, inviteCodes, walletIds) {
@@ -1190,7 +1295,7 @@ function requireStaticUpload(value, label, allowedTypes) {
   return { name, mime }
 }
 
-function syncStaticVipEarnings(account) {
+function syncStaticVipEarnings(state, account) {
   if (!Array.isArray(account.purchases) || !account.purchases.length) return false
 
   let changed = false
@@ -1216,6 +1321,7 @@ function syncStaticVipEarnings(account) {
       account.wallet.balance = roundStaticMoney((Number(account.wallet.balance) || 0) + dailyAmount)
       account.dailyEarnings = [{ tierId, earningDate, amount: dailyAmount, createdAt: new Date().toISOString() }, ...account.dailyEarnings]
       account.transactions = [createStaticTransaction('earning', dailyAmount, purchase.crypto, null, null, `${purchase.level} daily income ${earningDate}`, 'Credited'), ...account.transactions]
+      creditStaticReferralCommissions(state, account.id, dailyAmount, purchase.crypto, 'task')
       changed = true
     }
   }

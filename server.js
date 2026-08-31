@@ -13,14 +13,32 @@ const configuredInviteCodes = process.env.INVITE_CODES
 const bootstrapInviteCodes = new Set(String(configuredInviteCodes || defaultInviteCode).split(',').map(normalizeInviteCodeValue).filter(Boolean))
 const hasConfiguredInviteCodes = Boolean(configuredInviteCodes)
 const projectedMonthlyRate = 0.24
+const referralTeams = [
+  { level: 1, label: 'Team 1', taskRate: 0.03, depositRate: 0.06 },
+  { level: 2, label: 'Team 2', taskRate: 0.02, depositRate: 0.03 },
+  { level: 3, label: 'Team 3', taskRate: 0.01, depositRate: 0.02 },
+]
 const maxJsonBodySize = 8 * 1024 * 1024
 const maxUploadBytes = 3 * 1024 * 1024
 
-const tierAmounts = [40, 90, 140, 200, 300, 500, 700, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000]
+const tierPlans = [
+  { amount: 299, dailyIncome: 18.5 },
+  { amount: 499, dailyIncome: 31 },
+  { amount: 999, dailyIncome: 60.5 },
+  { amount: 1299, dailyIncome: 78 },
+  { amount: 1499, dailyIncome: 89.5 },
+  { amount: 1999, dailyIncome: 119 },
+  { amount: 2999, dailyIncome: 180 },
+  { amount: 4999, dailyIncome: 300 },
+  { amount: 9999, dailyIncome: 670 },
+  { amount: 19999, dailyIncome: 1350 },
+  { amount: 29999, dailyIncome: 1840 },
+  { amount: 49999, dailyIncome: 3230 },
+]
 const tierIds = ['starter', 'premium', 'elite', 'royal']
-const tierCatalog = Object.fromEntries(tierAmounts.map((amount, index) => {
+const tierCatalog = Object.fromEntries(tierPlans.map(({ amount, dailyIncome }, index) => {
   const id = tierIds[index] || `vip-${index + 1}`
-  return [id, { id, level: `VIP ${index + 1}`, title: `Sez VIP ${index + 1}`, amount }]
+  return [id, { id, level: `VIP ${index + 1}`, title: `Sez VIP ${index + 1}`, amount, dailyIncome }]
 }))
 
 const allowedCryptos = new Set(['USDT', 'BTC', 'ETH'])
@@ -142,6 +160,13 @@ const queries = {
     WHERE id = ?
   `),
   findUserByInviteCode: db.prepare('SELECT id, name, email, invite_code AS inviteCode FROM users WHERE invite_code = ?'),
+  findReferralParent: db.prepare(`
+    SELECT COALESCE(parent.id, invite_owner.id) AS parentId
+    FROM users AS child
+    LEFT JOIN users AS parent ON parent.id = child.referred_by_user_id
+    LEFT JOIN users AS invite_owner ON invite_owner.invite_code = child.registration_invite_code AND invite_owner.id <> child.id
+    WHERE child.id = ?
+  `),
   createUser: db.prepare(`
     INSERT INTO users (name, email, password_salt, password_hash, verified, invite_code, registration_invite_code, referred_by_user_id, wallet_id, wallet_balance)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -180,7 +205,7 @@ const queries = {
     INSERT OR IGNORE INTO daily_vip_earnings (user_id, purchase_id, tier_id, earning_date, amount)
     VALUES (?, ?, ?, ?, ?)
   `),
-  listReferrals: db.prepare(`
+  listDirectReferrals: db.prepare(`
     SELECT invited.id, invited.name, invited.email, invited.created_at AS createdAt
     FROM users AS invited
     JOIN users AS owner ON owner.id = ?
@@ -280,7 +305,7 @@ async function handleApi(request, response, url) {
   }
 
   if (request.method === 'GET' && url.pathname === '/api/referrals') {
-    sendJson(response, 200, { inviteCode: user.inviteCode, referrals: queries.listReferrals.all(user.id).map(toPublicReferral) })
+    sendJson(response, 200, { inviteCode: user.inviteCode, referrals: listReferralTeam(user.id) })
     return
   }
 
@@ -385,6 +410,7 @@ async function handleApi(request, response, url) {
     runInTransaction(() => {
       queries.updateWalletBalance.run(amount, user.id)
       queries.createWalletTransaction.run(user.id, 'recharge', amount, crypto, network, walletAddress(user, crypto, network), 'Wallet recharge', 'Credited')
+      creditReferralCommissions(user.id, amount, crypto, 'deposit')
     })
 
     const record = queries.findUserById.get(user.id)
@@ -543,6 +569,7 @@ function syncVipEarnings(userId) {
 
         queries.updateWalletBalance.run(dailyAmount, userId)
         queries.createWalletTransaction.run(userId, 'earning', dailyAmount, purchase.crypto, null, null, `${purchase.level} daily income ${earningDate}`, 'Credited')
+        creditReferralCommissions(userId, dailyAmount, purchase.crypto, 'task')
       }
     }
   })
@@ -565,8 +592,66 @@ function getMissingDailyEarningDates(purchaseCreatedAt, lastEarningDate) {
   return dates
 }
 
+function listReferralTeam(userId) {
+  const referrals = []
+  const seen = new Set([userId])
+  let currentTeamUserIds = [userId]
+
+  for (const team of referralTeams) {
+    const nextTeamUserIds = []
+    for (const teamUserId of currentTeamUserIds) {
+      for (const referral of queries.listDirectReferrals.all(teamUserId)) {
+        if (seen.has(referral.id)) continue
+
+        seen.add(referral.id)
+        nextTeamUserIds.push(referral.id)
+        referrals.push(toPublicReferral({ ...referral, ...team }))
+      }
+    }
+    currentTeamUserIds = nextTeamUserIds
+  }
+
+  return referrals
+}
+
+function creditReferralCommissions(sourceUserId, amount, crypto, kind) {
+  let childUserId = sourceUserId
+  const seen = new Set([sourceUserId])
+
+  for (const team of referralTeams) {
+    const parentId = Number(queries.findReferralParent.get(childUserId)?.parentId) || 0
+    if (!parentId || seen.has(parentId)) break
+
+    seen.add(parentId)
+    childUserId = parentId
+
+    const rate = kind === 'deposit' ? team.depositRate : team.taskRate
+    const commission = roundMoney((Number(amount) || 0) * rate)
+    if (commission <= 0) continue
+
+    queries.updateWalletBalance.run(commission, parentId)
+    queries.createWalletTransaction.run(
+      parentId,
+      kind === 'deposit' ? 'referral_deposit' : 'referral_task',
+      commission,
+      crypto,
+      null,
+      null,
+      `${team.label} ${kind === 'deposit' ? 'deposit' : 'task'} commission`,
+      'Credited',
+    )
+  }
+}
+
+function findTierPlanByAmount(amount) {
+  const numericAmount = Number(amount) || 0
+  return tierPlans.find((plan) => plan.amount === numericAmount || plan.amount + 1 === numericAmount)
+}
+
 function calculateDailyVipIncome(amount) {
-  return roundMoney((Number(amount) || 0) * projectedMonthlyRate / 30)
+  const numericAmount = Number(amount) || 0
+  const plan = findTierPlanByAmount(numericAmount)
+  return roundMoney(plan ? plan.dailyIncome : numericAmount * projectedMonthlyRate / 30)
 }
 
 function roundMoney(amount) {
@@ -628,7 +713,16 @@ function toPublicWallet(record) {
 }
 
 function toPublicReferral(record) {
-  return { id: record.id, name: record.name, email: record.email, createdAt: record.createdAt }
+  return {
+    id: record.id,
+    name: record.name,
+    email: record.email,
+    createdAt: record.createdAt,
+    level: Number(record.level) || 1,
+    team: record.label || `Team ${Number(record.level) || 1}`,
+    taskRate: Number(record.taskRate) || 0,
+    depositRate: Number(record.depositRate) || 0,
+  }
 }
 
 function toPublicWalletTransaction(record) {
@@ -662,7 +756,7 @@ function sendAccountPayload(response, status, record, extraHeaders = {}) {
     wallet: toPublicWallet(syncedRecord),
     purchases: queries.listPurchases.all(syncedRecord.id),
     transactions: queries.listWalletTransactions.all(syncedRecord.id).map(toPublicWalletTransaction),
-    referrals: queries.listReferrals.all(syncedRecord.id).map(toPublicReferral),
+    referrals: listReferralTeam(syncedRecord.id),
     verification: toPublicVerification(queries.findLatestVerification.get(syncedRecord.id)),
   }, extraHeaders)
 }
