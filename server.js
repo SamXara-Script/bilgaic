@@ -14,7 +14,8 @@ const bootstrapInviteCodes = new Set(String(configuredInviteCodes || defaultInvi
 const hasConfiguredInviteCodes = Boolean(configuredInviteCodes)
 const projectedMonthlyRate = 0.24
 const withdrawalFeeRate = 0.16
-const vipDailyPayoutHour = 16
+const payoutCycleMs = 24 * 60 * 60 * 1000
+const payoutSyncIntervalMs = 60 * 1000
 const referralTeams = [
   { level: 1, label: 'Team 1', taskRate: 0.06, depositRate: 0.03 },
   { level: 2, label: 'Team 2', taskRate: 0.03, depositRate: 0.02 },
@@ -200,8 +201,8 @@ const queries = {
     ORDER BY id
   `),
   createPurchase: db.prepare(`
-    INSERT INTO purchases (user_id, tier_id, tier_level, tier_title, amount, crypto)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO purchases (user_id, tier_id, tier_level, tier_title, amount, crypto, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `),
   findLastDailyVipEarning: db.prepare('SELECT MAX(earning_date) AS earningDate FROM daily_vip_earnings WHERE purchase_id = ?'),
   createDailyVipEarning: db.prepare(`
@@ -379,25 +380,25 @@ async function handleApi(request, response, url) {
     if (!allowedCryptos.has(crypto)) throw httpError(400, 'Choose a supported cryptocurrency.')
 
     try {
+      const createdAt = new Date().toISOString()
       runInTransaction(() => {
         const walletOwner = queries.findUserById.get(user.id)
         if (!walletOwner || Number(walletOwner.walletBalance) < tier.amount) throw httpError(400, 'Recharge your wallet before buying this plan.')
-        queries.createPurchase.run(user.id, tier.id, tier.level, tier.title, tier.amount, crypto)
+        queries.createPurchase.run(user.id, tier.id, tier.level, tier.title, tier.amount, crypto, createdAt)
         queries.updateWalletBalance.run(-tier.amount, user.id)
         queries.createWalletTransaction.run(user.id, 'purchase', tier.amount, crypto, null, null, `${tier.level} ${tier.title}`, 'Completed')
       })
+      const record = queries.findUserById.get(user.id)
+      sendJson(response, 201, {
+        purchase: { tierId: tier.id, level: tier.level, title: tier.title, amount: tier.amount, crypto, createdAt },
+        wallet: toPublicWallet(record),
+        transactions: queries.listWalletTransactions.all(user.id).map(toPublicWalletTransaction),
+      })
+      return
     } catch (error) {
       if (String(error.message).includes('UNIQUE constraint failed')) throw httpError(409, 'This plan is already in your profile.')
       throw error
     }
-
-    const record = queries.findUserById.get(user.id)
-    sendJson(response, 201, {
-      purchase: { tierId: tier.id, level: tier.level, title: tier.title, amount: tier.amount, crypto },
-      wallet: toPublicWallet(record),
-      transactions: queries.listWalletTransactions.all(user.id).map(toPublicWalletTransaction),
-    })
-    return
   }
 
   if (request.method === 'POST' && url.pathname === '/api/recharges') {
@@ -593,27 +594,32 @@ function syncAllVipEarnings() {
 }
 
 function scheduleVipPayoutSync() {
-  const nextRun = getNextVipPayoutRunDate()
-  const delay = Math.max(nextRun.getTime() - Date.now(), 1000)
   setTimeout(() => {
     syncAllVipEarnings()
     scheduleVipPayoutSync()
-  }, Math.min(delay, 2147483647))
+  }, payoutSyncIntervalMs)
 }
 
 function getMissingDailyEarningDates(purchaseCreatedAt, lastEarningDate) {
-  const latestPayoutDate = getLatestVipPayoutDate()
-  const lastDate = lastEarningDate ? parseLocalDate(lastEarningDate) : null
   const purchaseDate = parseLocalDate(purchaseCreatedAt)
-  let currentDate = lastDate ? addLocalDays(startOfLocalDay(lastDate), 1) : getFirstVipPayoutDate(purchaseDate)
+  let currentPayout = lastEarningDate
+    ? getPayoutMomentForDate(addLocalDays(parseLocalDate(lastEarningDate), 1), purchaseDate)
+    : new Date(purchaseDate.getTime() + payoutCycleMs)
   const dates = []
+  const now = new Date()
 
-  while (currentDate <= latestPayoutDate) {
-    dates.push(toLocalDateKey(currentDate))
-    currentDate = addLocalDays(currentDate, 1)
+  while (currentPayout <= now) {
+    dates.push(toLocalDateKey(currentPayout))
+    currentPayout = addLocalDays(currentPayout, 1)
   }
 
   return dates
+}
+
+function getPayoutMomentForDate(date, purchaseDate) {
+  const payoutMoment = startOfLocalDay(date)
+  payoutMoment.setHours(purchaseDate.getHours(), purchaseDate.getMinutes(), purchaseDate.getSeconds(), purchaseDate.getMilliseconds())
+  return payoutMoment
 }
 
 function listReferralTeam(userId) {
@@ -692,27 +698,6 @@ function roundMoney(amount) {
 
 function formatServerMoney(amount) {
   return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-}
-
-function getFirstVipPayoutDate(purchaseDate) {
-  const payoutDate = startOfLocalDay(purchaseDate)
-  const payoutMoment = new Date(payoutDate)
-  payoutMoment.setHours(vipDailyPayoutHour, 0, 0, 0)
-  return purchaseDate >= payoutMoment ? addLocalDays(payoutDate, 1) : payoutDate
-}
-
-function getLatestVipPayoutDate(now = new Date()) {
-  const payoutDate = startOfLocalDay(now)
-  const payoutMoment = new Date(payoutDate)
-  payoutMoment.setHours(vipDailyPayoutHour, 0, 0, 0)
-  return now >= payoutMoment ? payoutDate : addLocalDays(payoutDate, -1)
-}
-
-function getNextVipPayoutRunDate(now = new Date()) {
-  const nextRun = new Date(now)
-  nextRun.setHours(vipDailyPayoutHour, 0, 2, 0)
-  if (nextRun <= now) nextRun.setDate(nextRun.getDate() + 1)
-  return nextRun
 }
 
 function parseLocalDate(value) {

@@ -4,8 +4,8 @@ export function IconButton({ label, icon, tone, onClick }) {
   return <button className="icon-action" type="button" style={{ '--tone': tones[tone] }} onClick={onClick}><span><ActionIcon name={icon} /></span><em>{label}</em></button>
 }
 
-export function PrimaryButton({ label, icon, secondary = false, onClick }) {
-  return <button className={`primary-button${secondary ? ' secondary' : ''}`} type="button" onClick={onClick}>{icon && <ActionIcon name={icon} />}{label}</button>
+export function PrimaryButton({ label, icon, secondary = false, disabled = false, onClick }) {
+  return <button className={`primary-button${secondary ? ' secondary' : ''}`} type="button" disabled={disabled} onClick={onClick}>{icon && <ActionIcon name={icon} />}{label}</button>
 }
 
 export function SegmentButton({ label, active, onClick }) {

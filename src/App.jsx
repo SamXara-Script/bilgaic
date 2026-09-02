@@ -23,6 +23,7 @@ const pageMeta = {
   security: { eyebrow: 'Account protection', title: 'Security' },
   profileSettings: { eyebrow: 'Account management', title: 'Profile settings' },
   verification: { eyebrow: 'Customer verification', title: 'Verify account' },
+  language: { eyebrow: 'Display settings', title: 'Language' },
 }
 
 const actionItems = [
@@ -39,7 +40,8 @@ const cryptoOptions = [
 
 const projectedMonthlyRate = 0.24
 const withdrawalFeeRate = 0.16
-const vipDailyPayoutHour = 16
+const profitWindowDays = 17
+const payoutCycleMs = 24 * 60 * 60 * 1000
 const telegramSupportUrl = 'https://t.me/+J82Rio5xns1lY2Ni'
 const referralTeams = [
   { level: 1, label: 'Team 1', taskRate: 0.06, depositRate: 0.03 },
@@ -96,12 +98,33 @@ const tierFilters = [
 ]
 
 const staticAuthStorageKey = 'sez-demo-auth'
+const languageStorageKey = 'sez-language'
+const defaultLanguageId = 'en'
 const defaultInviteCode = 'SEZ2026'
 const emptyWallet = { id: '', balance: 0 }
 const verificationRequiredMessage = 'Upload your ID or passport and face photo to verify your account.'
 const uploadMaxBytes = 3 * 1024 * 1024
 const documentUploadTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
 const faceUploadTypes = ['image/jpeg', 'image/png', 'image/webp']
+const languageOptions = [
+  { id: 'en', label: 'English' },
+  { id: 'ru', label: 'Russian' },
+  { id: 'ka', label: 'Georgian' },
+  { id: 'es', label: 'Spanish' },
+  { id: 'de', label: 'German' },
+  { id: 'tr', label: 'Turkish' },
+  { id: 'fr', label: 'French' },
+  { id: 'it', label: 'Italian' },
+  { id: 'id', label: 'Indonesian' },
+  { id: 'lv', label: 'Latvian' },
+  { id: 'pt', label: 'Portuguese' },
+  { id: 'hu', label: 'Hungarian' },
+  { id: 'pl', label: 'Polish' },
+  { id: 'ro', label: 'Romanian' },
+  { id: 'hy', label: 'Armenian' },
+  { id: 'zh', label: 'Chinese' },
+  { id: 'ko', label: 'Korean' },
+]
 
 function App() {
   const [activeView, setActiveView] = useState('home')
@@ -119,6 +142,8 @@ function App() {
   const [user, setUser] = useState(null)
   const [authMode, setAuthMode] = useState('login')
   const [authReady, setAuthReady] = useState(false)
+  const [language, setLanguage] = useState(readSavedLanguage)
+  const [clockNow, setClockNow] = useState(() => Date.now())
 
   const applyAccountPayload = useCallback((payload) => {
     setUser(payload.user)
@@ -149,7 +174,7 @@ function App() {
   }, [applyAccountPayload])
 
   useEffect(() => {
-    if (!user?.id) return undefined
+    if (!user?.id || !purchases.length) return undefined
 
     let active = true
     let timeoutId = 0
@@ -166,7 +191,7 @@ function App() {
     }
 
     function scheduleRefresh() {
-      const nextRefresh = getNextVipPayoutRefreshDate()
+      const nextRefresh = getNextPortfolioPayoutRefreshDate(purchases)
       const delay = Math.max(nextRefresh.getTime() - Date.now(), 1000)
       timeoutId = window.setTimeout(refreshAfterPayout, Math.min(delay, 2147483647))
     }
@@ -176,7 +201,21 @@ function App() {
       active = false
       window.clearTimeout(timeoutId)
     }
-  }, [applyAccountPayload, user?.id])
+  }, [applyAccountPayload, purchases, user?.id])
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setClockNow(Date.now()), 1000)
+    return () => window.clearInterval(intervalId)
+  }, [])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(languageStorageKey, language)
+    } catch {
+      // Language still applies for the current browser session.
+    }
+    document.documentElement.lang = language
+  }, [language])
 
   const filteredTiers = useMemo(() => {
     const selectedFilter = tierFilters.find((filter) => filter.id === tierFilter) || tierFilters[0]
@@ -189,10 +228,10 @@ function App() {
       const projection = getTierProjection(purchase.price, purchase.monthlyRate)
       return {
         dailyIncome: total.dailyIncome + projection.dailyIncome,
-        weeklyIncome: total.weeklyIncome + projection.weeklyIncome,
+        periodProfit: total.periodProfit + projection.periodProfit,
         monthlyProfit: total.monthlyProfit + projection.monthlyProfit,
       }
-    }, { dailyIncome: 0, weeklyIncome: 0, monthlyProfit: 0 })
+    }, { dailyIncome: 0, periodProfit: 0, monthlyProfit: 0 })
 
     return {
       totalInvested,
@@ -201,10 +240,14 @@ function App() {
       walletBalance: wallet.balance,
       earnings: projected.monthlyProfit,
       dailyIncome: projected.dailyIncome,
-      weeklyIncome: projected.weeklyIncome,
+      periodProfit: projected.periodProfit,
       oneMonthResult: totalInvested + projected.monthlyProfit,
     }
   }, [purchases, wallet.balance, wallet.id])
+
+  const selectedLanguage = useMemo(() => getLanguageOption(language), [language])
+  const payoutTimer = useMemo(() => getPortfolioPayoutTimer(purchases, clockNow), [purchases, clockNow])
+  const mainingPurchase = mainingTier ? purchases.find((purchase) => purchase.id === mainingTier.id) : null
 
   const activities = useMemo(() => {
     const transactionActivities = transactions.map(toActivity)
@@ -254,6 +297,12 @@ function App() {
     setMainingTier(null)
     setMainingBackView('invest')
     setActiveView(view)
+  }
+
+  function updateLanguage(nextLanguage) {
+    const option = getLanguageOption(nextLanguage)
+    setLanguage(option.id)
+    showNotice(`Language changed to ${option.label}.`)
   }
 
   async function confirmPurchase() {
@@ -377,17 +426,18 @@ function App() {
         </header>
         <div className="page-content">
           {checkoutTier ? <CheckoutView tier={checkoutTier} crypto={selectedCrypto} wallet={wallet} onCrypto={setSelectedCrypto} onBack={() => setCheckoutTier(null)} onConfirm={confirmPurchase} /> : <>
-            {activeView === 'home' && <HomeView onAction={showNotice} onNavigate={navigateTo} onVerify={() => navigateTo('verification')} onHistory={() => navigateTo('wallet')} portfolio={portfolio} activities={activities} user={user} onLogout={logout} />}
-            {activeView === 'invest' && <InvestView filter={tierFilter} onFilter={setTierFilter} tiers={filteredTiers} portfolio={portfolio} purchases={purchases} onReadMore={(tier) => showMainingDetails(tier, 'invest')} onProfile={() => navigateTo('profile')} />}
-            {activeView === 'mainingDetails' && mainingTier && <MainingDetailsView tier={mainingTier} owned={purchases.some((purchase) => purchase.id === mainingTier.id)} onBack={() => navigateTo(mainingBackView)} onBuy={startCheckout} onProfile={() => navigateTo('profile')} />}
-            {activeView === 'wallet' && <WalletView onAction={showNotice} onRecharge={() => navigateTo('recharge')} onWithdraw={() => navigateTo('withdraw')} portfolio={portfolio} activities={activities} />}
+            {activeView === 'home' && <HomeView onAction={showNotice} onNavigate={navigateTo} onVerify={() => navigateTo('verification')} onHistory={() => navigateTo('wallet')} portfolio={portfolio} payoutTimer={payoutTimer} activities={activities} user={user} onLogout={logout} />}
+            {activeView === 'invest' && <InvestView filter={tierFilter} onFilter={setTierFilter} tiers={filteredTiers} portfolio={portfolio} payoutTimer={payoutTimer} purchases={purchases} now={clockNow} onReadMore={(tier) => showMainingDetails(tier, 'invest')} />}
+            {activeView === 'mainingDetails' && mainingTier && <MainingDetailsView tier={mainingPurchase || mainingTier} owned={Boolean(mainingPurchase)} payoutTimer={getPurchasePayoutTimer(mainingPurchase, clockNow)} onBack={() => navigateTo(mainingBackView)} onBuy={startCheckout} />}
+            {activeView === 'wallet' && <WalletView onAction={showNotice} onRecharge={() => navigateTo('recharge')} onWithdraw={() => navigateTo('withdraw')} portfolio={portfolio} payoutTimer={payoutTimer} activities={activities} />}
             {activeView === 'referrals' && <ReferralView user={user} referrals={referrals} onCopy={copyInviteCode} onRefresh={refreshReferrals} />}
-            {activeView === 'profile' && <ProfileView onAction={showNotice} onProfileSettings={() => navigateTo('profileSettings')} onSecurity={() => navigateTo('security')} onReferrals={() => navigateTo('referrals')} onVerification={() => navigateTo('verification')} onReadMore={(tier) => showMainingDetails(tier, 'profile')} portfolio={portfolio} purchases={purchases} user={user} verification={verification} onLogout={logout} />}
+            {activeView === 'profile' && <ProfileView onAction={showNotice} onProfileSettings={() => navigateTo('profileSettings')} onLanguage={() => navigateTo('language')} onSecurity={() => navigateTo('security')} onReferrals={() => navigateTo('referrals')} onVerification={() => navigateTo('verification')} onReadMore={(tier) => showMainingDetails(tier, 'profile')} portfolio={portfolio} payoutTimer={payoutTimer} purchases={purchases} now={clockNow} user={user} verification={verification} language={selectedLanguage} onLogout={logout} />}
             {activeView === 'recharge' && <RechargeView wallet={wallet} onBack={() => setActiveView('wallet')} onRecharge={submitRecharge} />}
             {activeView === 'withdraw' && <WithdrawView onBack={() => setActiveView('wallet')} onWithdraw={submitWithdrawal} portfolio={portfolio} />}
             {activeView === 'profileSettings' && <ProfileSettingsView user={user} onBack={() => setActiveView('profile')} onSave={updateProfile} />}
             {activeView === 'security' && <SecurityView user={user} onBack={() => setActiveView('profile')} onAction={showNotice} onPasswordChange={updatePassword} onVerification={() => navigateTo('verification')} />}
             {activeView === 'verification' && <VerificationView user={user} verification={verification} onBack={() => setActiveView('profile')} onVerify={submitVerification} />}
+            {activeView === 'language' && <LanguageView language={language} onBack={() => setActiveView('profile')} onChange={updateLanguage} />}
           </>}
         </div>
       </div>
@@ -441,7 +491,7 @@ function VerificationBanner({ onVerify }) {
   return <section className="verification-banner"><div><p className="eyebrow">Unverified account</p><h2>Upload your ID or passport and face photo.</h2></div><button type="button" onClick={onVerify}><Icon name="upload" />Verify</button></section>
 }
 
-function HomeView({ onAction, onNavigate, onVerify, onHistory, portfolio, activities, user, onLogout }) {
+function HomeView({ onAction, onNavigate, onVerify, onHistory, portfolio, payoutTimer, activities, user, onLogout }) {
   const overviewItems = getOverviewItems(portfolio)
 
   return (
@@ -456,6 +506,7 @@ function HomeView({ onAction, onNavigate, onVerify, onHistory, portfolio, activi
           <p className="eyebrow balance-label">Total Balance</p>
           <p className="balance-value">{formatMoney(portfolio.walletBalance)}</p>
           <p className="growth"><Icon name="trend" /> 0% this month</p>
+          <PayoutTimer timer={payoutTimer} />
           <div className="income-strip">
             <div className="income-icon"><Icon name="check" /></div>
             <div><p className="micro-label">My Income</p><strong>{formatMoney(portfolio.earnings)}</strong></div>
@@ -485,7 +536,7 @@ function HomeView({ onAction, onNavigate, onVerify, onHistory, portfolio, activi
   )
 }
 
-function InvestView({ filter, onFilter, tiers: tierItems, portfolio, purchases, onReadMore, onProfile }) {
+function InvestView({ filter, onFilter, tiers: tierItems, portfolio, payoutTimer, purchases, now, onReadMore }) {
   return (
     <>
       <section className="investment-summary">
@@ -493,13 +544,16 @@ function InvestView({ filter, onFilter, tiers: tierItems, portfolio, purchases, 
           <div><p className="eyebrow">Investment</p><h1>Maining Devices</h1></div>
           <div className="active-tier"><span>Active</span><strong>{portfolio.activeTiers} Plans</strong></div>
         </div>
-        <div className="summary-metrics"><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label="1 Month Result" value={formatMoney(portfolio.oneMonthResult)} /></div>
+        <div className="summary-metrics"><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label={`${profitWindowDays} Day Profit`} value={formatMoney(portfolio.periodProfit)} green /><Metric label="1 Month Result" value={formatMoney(portfolio.oneMonthResult)} /><Metric label="Next Payout" value={payoutTimer ? formatCountdown(payoutTimer.remainingMs) : 'No active plan'} /></div>
       </section>
 
       <div className="filter-row" role="tablist" aria-label="Maining plans">
         {tierFilters.map((item) => <SegmentButton key={item.id} label={item.label} active={filter === item.id} onClick={() => onFilter(item.id)} />)}
       </div>
-      <section className="tier-list">{tierItems.map((tier) => <TierCard key={tier.id} tier={tier} owned={purchases.some((purchase) => purchase.id === tier.id)} onReadMore={onReadMore} onProfile={onProfile} />)}</section>
+      <section className="tier-list">{tierItems.map((tier) => {
+        const purchase = purchases.find((item) => item.id === tier.id)
+        return <TierCard key={tier.id} tier={purchase || tier} owned={Boolean(purchase)} now={now} onReadMore={onReadMore} />
+      })}</section>
     </>
   )
 }
@@ -512,26 +566,27 @@ function WalletView({ onAction, onRecharge, onWithdraw, portfolio, activities })
         <div className="wallet-identity"><span>Wallet ID</span><strong>{portfolio.walletId || 'Not assigned'}</strong></div>
         <div className="wallet-buttons"><PrimaryButton label="Recharge" icon="plus" onClick={onRecharge} /><PrimaryButton label="Withdraw" icon="arrow-up" secondary onClick={onWithdraw} /></div>
       </section>
-      <section className="wallet-stats"><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label="Weekly Income" value={formatMoney(portfolio.weeklyIncome)} green /><Metric label="1 Month Profit" value={formatMoney(portfolio.earnings)} /><Metric label="Active Plans" value={String(portfolio.activeTiers)} /></section>
+      <section className="wallet-stats"><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label={`${profitWindowDays} Day Profit`} value={formatMoney(portfolio.periodProfit)} green /><Metric label="1 Month Profit" value={formatMoney(portfolio.earnings)} /><Metric label="Active Plans" value={String(portfolio.activeTiers)} /></section>
       <SectionHeader title="Recent Activity" action="History" onAction={() => onAction('Wallet history is up to date.')} />
       <ActivityList items={activities} emptyMessage="No transactions yet" />
     </>
   )
 }
 
-function ProfileView({ onAction, onProfileSettings, onSecurity, onReferrals, onVerification, onReadMore, portfolio, purchases, user, verification, onLogout }) {
+function ProfileView({ onAction, onProfileSettings, onLanguage, onSecurity, onReferrals, onVerification, onReadMore, portfolio, purchases, now, user, verification, language, onLogout }) {
   const verificationLabel = user.verified ? 'Verified' : 'Unverified'
   const verificationDate = verification?.createdAt ? `Verified ${formatShortDate(verification.createdAt)}` : 'ID/passport and face photo required'
 
   return (
     <>
       <section className="profile-hero"><div className="large-avatar">{user.name.slice(0, 1).toUpperCase()}</div><div><p className="eyebrow">Member Account</p><h1>{user.name}</h1><p>{user.email}</p><span className={`verification-pill${user.verified ? ' verified' : ''}`}>{verificationLabel}</span></div></section>
-      <section className="profile-grid"><Metric label="Wallet" value={formatMoney(portfolio.walletBalance)} /><Metric label="Active Plans" value={String(portfolio.activeTiers)} /><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label="1 Month Result" value={formatMoney(portfolio.oneMonthResult)} /></section>
+      <section className="profile-grid"><Metric label="Wallet" value={formatMoney(portfolio.walletBalance)} /><Metric label="Active Plans" value={String(portfolio.activeTiers)} /><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label={`${profitWindowDays} Day Profit`} value={formatMoney(portfolio.periodProfit)} green /></section>
       {!user.verified && <VerificationBanner onVerify={onVerification} />}
-      <section className="purchased-panel"><SectionHeader title="Purchased Plans" action={`${portfolio.activeTiers} active`} onAction={() => onAction('Your purchased plans are shown below.')} /><PurchasedTiers purchases={purchases} onReadMore={onReadMore} /></section>
+      <section className="purchased-panel"><SectionHeader title="Purchased Plans" action={`${portfolio.activeTiers} active`} onAction={() => onAction('Your purchased plans are shown below.')} /><PurchasedTiers purchases={purchases} now={now} onReadMore={onReadMore} /></section>
       <section className="settings-list">
         <button type="button" onClick={onVerification}><span><Icon name="upload" />Verification</span><small>{verificationDate}</small><Icon name="chevron" /></button>
         <button type="button" onClick={onProfileSettings}><span><Icon name="user" />Profile settings</span><Icon name="chevron" /></button>
+        <button type="button" onClick={onLanguage}><span><Icon name="globe" />Language</span><small>{language.label}</small><Icon name="chevron" /></button>
         <button type="button" onClick={onReferrals}><span><Icon name="send" />Referrals</span><Icon name="chevron" /></button>
         <button type="button" onClick={onSecurity}><span><Icon name="shield" />Security</span><Icon name="chevron" /></button>
         <button type="button" className="signout-row" onClick={onLogout}><span><Icon name="logout" />Sign out</span><Icon name="chevron" /></button>
@@ -583,8 +638,9 @@ function ReferralList({ referrals }) {
   return <div className="referral-list">{referrals.map((referral) => <article className="referral-row" key={referral.id}><div><span className="team-tag">{referral.team || `Team ${referral.level || 1}`}</span><h3>{referral.name}</h3><p>{referral.email}</p></div><div className="referral-meta"><strong>{formatShortDate(referral.createdAt)}</strong><small>Task {formatPercent(referral.taskRate)} / Deposit {formatPercent(referral.depositRate)}</small></div></article>)}</div>
 }
 
-function TierCard({ tier, owned, onReadMore, onProfile }) {
+function TierCard({ tier, owned, now, onReadMore }) {
   const projection = getTierProjection(tier.price, tier.monthlyRate)
+  const payoutTimer = owned ? getPurchasePayoutTimer(tier, now) : null
 
   return (
     <article className="tier-card" style={{ '--accent': tier.color, '--accent-shadow': tier.shadow }}>
@@ -594,13 +650,14 @@ function TierCard({ tier, owned, onReadMore, onProfile }) {
       </div>
       <div className="risk-row"><span className="micro-label">Daily Payout</span><strong>{tier.risk}</strong></div>
       <div className="risk-track"><span style={{ width: `${tier.riskValue}%` }} /></div>
-      <div className="tier-stats"><Metric label="Daily Income" value={formatMoney(projection.dailyIncome)} /><Metric label="Weekly Income" value={formatMoney(projection.weeklyIncome)} /><Metric label="1 Month Result" value={formatMoney(projection.monthResult)} /></div>
-      <PrimaryButton label={owned ? 'View Profile' : 'Read More'} onClick={() => owned ? onProfile() : onReadMore(tier)} />
+      <div className="tier-stats"><Metric label="Daily Income" value={formatMoney(projection.dailyIncome)} /><Metric label={`${profitWindowDays} Day Profit`} value={formatMoney(projection.periodProfit)} /><Metric label="1 Month Result" value={formatMoney(projection.monthResult)} /></div>
+      {payoutTimer && <PayoutTimer timer={payoutTimer} />}
+      <PrimaryButton label="Read More" onClick={() => onReadMore(tier)} />
     </article>
   )
 }
 
-function MainingDetailsView({ tier, owned, onBack, onBuy, onProfile }) {
+function MainingDetailsView({ tier, owned, payoutTimer, onBack, onBuy }) {
   const projection = getTierProjection(tier.price, tier.monthlyRate)
 
   return <section className="detail-page maining-page" style={{ '--accent': tier.color, '--accent-shadow': tier.shadow }}>
@@ -610,19 +667,26 @@ function MainingDetailsView({ tier, owned, onBack, onBuy, onProfile }) {
         <p className="eyebrow">Maining plan</p>
         <span className="vip-pill"><span />{tier.level}</span>
         <h1>{tier.title}</h1>
-        <p>Maining is a customer plan that connects your account balance to a selected mining package. The dashboard tracks the plan price, daily payout, weekly income, and 1 month result.</p>
-        <div className="maining-metrics"><Metric label="Plan Price" value={formatMoney(tier.price)} /><Metric label="Daily Payout" value={formatMoney(projection.dailyIncome)} green /><Metric label="Weekly Income" value={formatMoney(projection.weeklyIncome)} /><Metric label="1 Month Result" value={formatMoney(projection.monthResult)} /></div>
-        <PrimaryButton label={owned ? 'View Profile' : 'Buy Now'} icon="check" onClick={() => owned ? onProfile() : onBuy(tier)} />
+        <p>Maining is a customer plan that connects your account balance to a selected mining package. The dashboard tracks the plan price, daily payout, {profitWindowDays}-day profit, and 1 month result.</p>
+        <div className="maining-metrics"><Metric label="Plan Price" value={formatMoney(tier.price)} /><Metric label="Daily Payout" value={formatMoney(projection.dailyIncome)} green /><Metric label={`${profitWindowDays} Day Profit`} value={formatMoney(projection.periodProfit)} /><Metric label="1 Month Result" value={formatMoney(projection.monthResult)} /></div>
+        {payoutTimer && <PayoutTimer timer={payoutTimer} />}
+        <PrimaryButton label={owned ? 'Purchased' : 'Buy Now'} icon="check" disabled={owned} onClick={() => onBuy(tier)} />
       </section>
       <section className="info-panel maining-info">
         <p className="eyebrow">How it works</p>
         <h2>What Maining uses</h2>
         <div className="maining-copy"><h3>Mining equipment</h3><p>Maining plans are presented as access to managed mining devices that produce daily account income after the payout time.</p></div>
         <div className="maining-copy"><h3>Power and network pools</h3><p>The operation uses electricity capacity, network mining pools, and wallet settlement to calculate the daily payout shown on each plan.</p></div>
-        <div className="maining-copy"><h3>Wallet balance</h3><p>After purchase, the plan income is credited to the customer wallet at 4:00 PM each day when the account is active.</p></div>
+        <div className="maining-copy"><h3>Wallet balance</h3><p>After purchase, the plan income is credited to the customer wallet every 24 hours when the account is active.</p></div>
       </section>
     </div>
   </section>
+}
+
+function PayoutTimer({ timer }) {
+  if (!timer) return null
+
+  return <div className="payout-timer"><span><Icon name="clock" />24H Timer</span><strong>{formatCountdown(timer.remainingMs)}</strong><small>Next payout</small></div>
 }
 
 function OverviewCard({ item }) {
@@ -634,11 +698,12 @@ function ActivityList({ items, emptyMessage }) {
   return <section className="activity-list">{items.map((item, index) => <article className="activity-row" key={`${item.title}-${item.time}-${index}`}><div className={`activity-icon ${item.tone}`}><Icon name={item.type} /></div><div className="activity-copy"><h3>{item.title}</h3><p>{item.time}</p></div><strong className={item.amount.startsWith('+') ? 'positive' : 'negative'}>{item.amount}</strong></article>)}</section>
 }
 
-function PurchasedTiers({ purchases, onReadMore }) {
+function PurchasedTiers({ purchases, now, onReadMore }) {
   if (!purchases.length) return <div className="empty-state purchased-empty"><Icon name="grid" /><p>No plan purchased yet</p></div>
   return <div className="purchased-list">{purchases.map((purchase) => {
     const projection = getTierProjection(purchase.price, purchase.monthlyRate)
-    return <article className="purchased-tier" key={purchase.id} style={{ '--accent': purchase.color }}><div><span className="vip-pill"><span />{purchase.level}</span><h3>{purchase.title}</h3><p>Daily {formatMoney(projection.dailyIncome)} - 1 month {formatMoney(projection.monthResult)}</p></div><div className="purchased-tier-actions"><strong>{formatMoney(purchase.price)}</strong><button type="button" onClick={() => onReadMore(purchase)}>Read More</button></div></article>
+    const payoutTimer = getPurchasePayoutTimer(purchase, now)
+    return <article className="purchased-tier" key={purchase.id} style={{ '--accent': purchase.color }}><div><span className="vip-pill"><span />{purchase.level}</span><h3>{purchase.title}</h3><p>Daily {formatMoney(projection.dailyIncome)} - {profitWindowDays} day {formatMoney(projection.periodProfit)}</p>{payoutTimer && <small className="purchased-countdown"><Icon name="clock" />{formatCountdown(payoutTimer.remainingMs)} left</small>}</div><div className="purchased-tier-actions"><strong>{formatMoney(purchase.price)}</strong><button type="button" onClick={() => onReadMore(purchase)}>Read More</button></div></article>
   })}</div>
 }
 
@@ -774,6 +839,29 @@ function ProfileSettingsView({ user, onBack, onSave }) {
   </section>
 }
 
+function LanguageView({ language, onBack, onChange }) {
+  const selectedLanguage = getLanguageOption(language)
+
+  return <section className="detail-page">
+    <button className="subpage-back" type="button" onClick={onBack}><Icon name="arrow-left" />Back to profile</button>
+    <div className="detail-grid language-layout">
+      <section className="form-panel settings-form">
+        <p className="eyebrow">Display settings</p>
+        <h1>Language</h1>
+        <label>Interface language<select value={selectedLanguage.id} onChange={(event) => onChange(event.target.value)}>{languageOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
+        <div className="language-options" aria-label="Available languages">
+          {languageOptions.map((option) => <button className={`language-option${option.id === selectedLanguage.id ? ' active' : ''}`} type="button" key={option.id} onClick={() => onChange(option.id)}><span>{option.label}</span>{option.id === selectedLanguage.id && <Icon name="check" />}</button>)}
+        </div>
+      </section>
+      <section className="info-panel language-panel">
+        <p className="eyebrow">Current language</p>
+        <h2>{selectedLanguage.label}</h2>
+        <div className="verification-status verified"><Icon name="globe" /><span>{selectedLanguage.label} is selected for this browser.</span></div>
+      </section>
+    </div>
+  </section>
+}
+
 function SecurityView({ user, onBack, onAction, onPasswordChange, onVerification }) {
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -873,7 +961,7 @@ function Metric({ label, value, green = false }) {
 function getOverviewItems(portfolio) {
   return [
     { label: 'Daily', value: formatMoney(portfolio.dailyIncome), note: 'projected', color: '#4a91ff', bars: [10, 16, 13, 21, 18, 25, 30, 26] },
-    { label: 'Weekly', value: formatMoney(portfolio.weeklyIncome), note: 'projected', color: '#a983ff', bars: [12, 11, 20, 15, 26, 22, 32, 29] },
+    { label: `${profitWindowDays} Day`, value: formatMoney(portfolio.periodProfit), note: 'profit', color: '#a983ff', bars: [12, 11, 20, 15, 26, 22, 32, 29] },
     { label: '1 Month', value: formatMoney(portfolio.oneMonthResult), note: 'final result', color: '#1fe1b0', bars: [7, 15, 11, 25, 20, 30, 27, 35] },
   ]
 }
@@ -883,15 +971,60 @@ function getTierProjection(amount, monthlyRate = projectedMonthlyRate) {
   const plan = findTierPlanByAmount(numericAmount)
   const dailyIncome = plan ? plan.dailyIncome : numericAmount * monthlyRate / 30
   const monthlyProfit = plan ? dailyIncome * 30 : numericAmount * monthlyRate
-  const weeklyIncome = dailyIncome * 7
-  return { dailyIncome, weeklyIncome, monthlyProfit, monthResult: numericAmount + monthlyProfit }
+  const periodProfit = dailyIncome * profitWindowDays
+  return { dailyIncome, periodProfit, monthlyProfit, monthResult: numericAmount + monthlyProfit }
 }
 
-function getNextVipPayoutRefreshDate(now = new Date()) {
-  const nextRefresh = new Date(now)
-  nextRefresh.setHours(vipDailyPayoutHour, 0, 2, 0)
-  if (nextRefresh <= now) nextRefresh.setDate(nextRefresh.getDate() + 1)
-  return nextRefresh
+function getPortfolioPayoutTimer(purchases, now = Date.now()) {
+  const timers = purchases.map((purchase) => getPurchasePayoutTimer(purchase, now)).filter(Boolean)
+  if (!timers.length) return null
+  return timers.reduce((soonest, timer) => timer.targetDate < soonest.targetDate ? timer : soonest)
+}
+
+function getPurchasePayoutTimer(purchase, now = Date.now()) {
+  const targetDate = getNextPurchasePayoutDate(purchase, now)
+  if (!targetDate) return null
+  return { targetDate, remainingMs: Math.max(targetDate.getTime() - Number(now), 0) }
+}
+
+function getNextPortfolioPayoutRefreshDate(purchases, now = Date.now()) {
+  const timer = getPortfolioPayoutTimer(purchases, now)
+  return new Date((timer?.targetDate.getTime() || Number(now) + payoutCycleMs) + 2000)
+}
+
+function getNextPurchasePayoutDate(purchase, now = Date.now()) {
+  const purchaseDate = parseClientDate(purchase?.createdAt)
+  if (!purchaseDate) return null
+  const elapsedMs = Math.max(Number(now) - purchaseDate.getTime(), 0)
+  const cyclesElapsed = Math.floor(elapsedMs / payoutCycleMs) + 1
+  return new Date(purchaseDate.getTime() + cyclesElapsed * payoutCycleMs)
+}
+
+function formatCountdown(milliseconds) {
+  const totalSeconds = Math.max(Math.ceil(Number(milliseconds) / 1000), 0)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+}
+
+function parseClientDate(value) {
+  if (!value) return null
+  const normalized = String(value).includes('T') ? String(value) : String(value).replace(' ', 'T')
+  const date = new Date(normalized.endsWith('Z') ? normalized : `${normalized}Z`)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function readSavedLanguage() {
+  try {
+    return getLanguageOption(window.localStorage.getItem(languageStorageKey)).id
+  } catch {
+    return defaultLanguageId
+  }
+}
+
+function getLanguageOption(value) {
+  return languageOptions.find((option) => option.id === value) || languageOptions[0]
 }
 
 function findTierPlanByAmount(amount) {
@@ -926,8 +1059,9 @@ function formatPercent(rate) {
 function toClientPurchase(purchase) {
   const tier = tiers.find((item) => item.id === purchase.tierId)
   const cryptoTone = cryptoOptions.find((option) => option.id === purchase.crypto)?.tone || 'blue'
-  if (tier) return { ...tier, ...purchase, id: tier.id, level: tier.level, title: tier.title, price: purchase.amount, tone: cryptoTone }
-  return { ...purchase, id: purchase.tierId, level: normalizeMainingText(purchase.level), title: normalizeMainingText(purchase.title), price: purchase.amount || 0, monthlyRate: projectedMonthlyRate, color: '#4b91ff', tone: cryptoTone }
+  const createdAt = purchase.createdAt || new Date().toISOString()
+  if (tier) return { ...tier, ...purchase, id: tier.id, level: tier.level, title: tier.title, price: purchase.amount, tone: cryptoTone, createdAt }
+  return { ...purchase, id: purchase.tierId, level: normalizeMainingText(purchase.level), title: normalizeMainingText(purchase.title), price: purchase.amount || 0, monthlyRate: projectedMonthlyRate, color: '#4b91ff', tone: cryptoTone, createdAt }
 }
 
 function toClientWallet(wallet) {
@@ -1443,32 +1577,25 @@ function syncStaticVipEarnings(state, account) {
 }
 
 function getStaticMissingDailyEarningDates(purchaseCreatedAt, lastEarningDate) {
-  const latestPayoutDate = getLatestStaticVipPayoutDate()
-  const lastDate = lastEarningDate ? parseStaticLocalDate(lastEarningDate) : null
   const purchaseDate = parseStaticLocalDate(purchaseCreatedAt)
-  let currentDate = lastDate ? addStaticLocalDays(startOfStaticLocalDay(lastDate), 1) : getFirstStaticVipPayoutDate(purchaseDate)
+  let currentPayout = lastEarningDate
+    ? getStaticPayoutMomentForDate(addStaticLocalDays(parseStaticLocalDate(lastEarningDate), 1), purchaseDate)
+    : new Date(purchaseDate.getTime() + payoutCycleMs)
   const dates = []
+  const now = new Date()
 
-  while (currentDate <= latestPayoutDate) {
-    dates.push(toStaticLocalDateKey(currentDate))
-    currentDate = addStaticLocalDays(currentDate, 1)
+  while (currentPayout <= now) {
+    dates.push(toStaticLocalDateKey(currentPayout))
+    currentPayout = addStaticLocalDays(currentPayout, 1)
   }
 
   return dates
 }
 
-function getFirstStaticVipPayoutDate(purchaseDate) {
-  const payoutDate = startOfStaticLocalDay(purchaseDate)
-  const payoutMoment = new Date(payoutDate)
-  payoutMoment.setHours(vipDailyPayoutHour, 0, 0, 0)
-  return purchaseDate >= payoutMoment ? addStaticLocalDays(payoutDate, 1) : payoutDate
-}
-
-function getLatestStaticVipPayoutDate(now = new Date()) {
-  const payoutDate = startOfStaticLocalDay(now)
-  const payoutMoment = new Date(payoutDate)
-  payoutMoment.setHours(vipDailyPayoutHour, 0, 0, 0)
-  return now >= payoutMoment ? payoutDate : addStaticLocalDays(payoutDate, -1)
+function getStaticPayoutMomentForDate(date, purchaseDate) {
+  const payoutMoment = startOfStaticLocalDay(date)
+  payoutMoment.setHours(purchaseDate.getHours(), purchaseDate.getMinutes(), purchaseDate.getSeconds(), purchaseDate.getMilliseconds())
+  return payoutMoment
 }
 
 function parseStaticLocalDate(value) {
@@ -1543,6 +1670,8 @@ function Icon({ name }) {
     copy: <><rect x="8" y="8" width="10" height="12" rx="2" /><path d="M6 16H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1" /></>,
     shield: <><path d="M12 3 5 6v5c0 4.7 2.9 8.2 7 10 4.1-1.8 7-5.3 7-10V6z" /><path d="m9.3 12 1.8 1.8 3.8-4" /></>,
     bell: <><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></>,
+    clock: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></>,
+    globe: <><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17" /><path d="M12 3.5c2.3 2.2 3.5 5 3.5 8.5s-1.2 6.3-3.5 8.5M12 3.5c-2.3 2.2-3.5 5-3.5 8.5s1.2 6.3 3.5 8.5" /></>,
     chevron: <path d="m9 5 7 7-7 7" />,
   }
   return <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>
