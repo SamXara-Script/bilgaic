@@ -131,6 +131,7 @@ const russianTranslations = {
   Amount: 'Сумма',
   Currency: 'Валюта',
   Network: 'Сеть',
+  'Crypto wallet address': 'Адрес криптокошелька',
   'Submit Recharge': 'Отправить пополнение',
   'Submitting...': 'Отправка...',
   'Payment address': 'Адрес платежа',

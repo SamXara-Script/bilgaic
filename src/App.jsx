@@ -337,14 +337,6 @@ function App() {
     showNotice('Account verified. You can now add balance and buy Maining plans.')
   }
 
-  async function submitRecharge({ amount, crypto, network }) {
-    if (!requireVerifiedAccount()) throw new Error(verificationRequiredMessage)
-    const result = await requestApi('/api/recharges', { method: 'POST', body: { amount, crypto, network } })
-    setWallet(toClientWallet(result.wallet))
-    setTransactions((result.transactions || []).map(toClientTransaction))
-    showNotice(`Wallet credited with ${formatMoney(amount)}.`)
-  }
-
   async function submitWithdrawal({ amount, crypto, address }) {
     if (!requireVerifiedAccount()) throw new Error(verificationRequiredMessage)
     const result = await requestApi('/api/withdrawals', { method: 'POST', body: { amount, crypto, address } })
@@ -430,7 +422,7 @@ function App() {
             {activeView === 'referrals' && <ReferralView user={user} referrals={referrals} onCopy={copyInviteCode} onRefresh={refreshReferrals} />}
             {activeView === 'support' && <SupportView onAction={showNotice} />}
             {activeView === 'profile' && <ProfileView onAction={showNotice} onProfileSettings={() => navigateTo('profileSettings')} onLanguage={() => navigateTo('language')} onSecurity={() => navigateTo('security')} onReferrals={() => navigateTo('referrals')} onVerification={() => navigateTo('verification')} onReadMore={(tier) => showMainingDetails(tier, 'profile')} portfolio={portfolio} payoutTimer={payoutTimer} purchases={purchases} now={clockNow} user={user} verification={verification} language={selectedLanguage} onLogout={logout} />}
-            {activeView === 'recharge' && <RechargeView wallet={wallet} onBack={() => setActiveView('wallet')} onRecharge={submitRecharge} />}
+            {activeView === 'recharge' && <RechargeView wallet={wallet} onBack={() => setActiveView('wallet')} />}
             {activeView === 'withdraw' && <WithdrawView onBack={() => setActiveView('wallet')} onWithdraw={submitWithdrawal} portfolio={portfolio} />}
             {activeView === 'profileSettings' && <ProfileSettingsView user={user} onBack={() => setActiveView('profile')} onSave={updateProfile} />}
             {activeView === 'security' && <SecurityView user={user} onBack={() => setActiveView('profile')} onAction={showNotice} onPasswordChange={updatePassword} onVerification={() => navigateTo('verification')} />}
@@ -737,44 +729,20 @@ function CheckoutView({ tier, crypto, wallet, onCrypto, onBack, onConfirm }) {
   </section>
 }
 
-function RechargeView({ wallet, onBack, onRecharge }) {
-  const [amount, setAmount] = useState('300')
+function RechargeView({ wallet, onBack }) {
   const [crypto, setCrypto] = useState('USDT')
   const [network, setNetwork] = useState('TRC20')
-  const [error, setError] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const amountValue = Math.max(Number(amount) || 0, 0)
+  const walletAddress = `SEZ-${wallet.id || 'WALLET'}-${crypto}-${network}`
 
-  async function submit(event) {
-    event.preventDefault()
-    setError('')
-    setSubmitting(true)
-    try {
-      await onRecharge({ amount: amountValue, crypto, network })
-    } catch (rechargeError) {
-      setError(rechargeError.message)
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  return <section className="detail-page">
+  return <section className="detail-page recharge-page">
     <button className="subpage-back" type="button" onClick={onBack}><Icon name="arrow-left" />Back to wallet</button>
-    <div className="detail-grid">
-      <form className="form-panel" onSubmit={submit}>
+    <div className="detail-grid recharge-layout">
+      <section className="form-panel recharge-panel">
         <p className="eyebrow">Recharge account</p>
         <h1>Add balance</h1>
-        <label>Amount<input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} required /></label>
         <label>Currency<select value={crypto} onChange={(event) => setCrypto(event.target.value)}>{cryptoOptions.map((option) => <option key={option.id} value={option.id}>{option.id} - {option.name}</option>)}</select></label>
         <label>Network<select value={network} onChange={(event) => setNetwork(event.target.value)}><option>TRC20</option><option>ERC20</option><option>BEP20</option></select></label>
-        {error && <p className="auth-error" role="alert">{error}</p>}
-        <button className="primary-button" type="submit" disabled={submitting}>{submitting ? 'Submitting...' : 'Submit Recharge'}</button>
-      </form>
-      <section className="info-panel">
-        <p className="eyebrow">Payment address</p>
-        <h2>{crypto} {network}</h2>
-        <div className="address-box">SEZ-{wallet.id || 'WALLET'}-{crypto}-{network}</div>
-        <div className="result-strip"><Metric label="Recharge Amount" value={formatMoney(amountValue)} /><Metric label="Status" value="Credited" /></div>
+        <label>Crypto wallet address<input className="wallet-address-input" value={walletAddress} readOnly onFocus={(event) => event.target.select()} /></label>
       </section>
     </div>
   </section>
