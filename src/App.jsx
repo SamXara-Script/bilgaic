@@ -2,12 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import './App.css'
 import { BottomNav, SideNav } from './components/navbar.jsx'
 import { IconButton, PrimaryButton, SegmentButton } from './components/button.jsx'
+import { defaultLanguageId, formatLanguageChangeNotice, getLanguageOption, languageOptions, observePageTranslations } from './i18n.js'
 
 const navItems = [
   { id: 'home', label: 'Home', icon: 'home' },
   { id: 'invest', label: 'Invest', icon: 'grid' },
   { id: 'wallet', label: 'Wallet', icon: 'wallet' },
-  { id: 'referrals', label: 'Refer', icon: 'send' },
+  { id: 'referrals', label: 'Referral', icon: 'send' },
   { id: 'support', label: 'Support', icon: 'support' },
   { id: 'profile', label: 'Profile', icon: 'user' },
 ]
@@ -99,34 +100,15 @@ const tierFilters = [
   { id: 'pro', label: '$10,000-$50,000', matches: (tier) => tier.price >= 10000 },
 ]
 
-const staticAuthStorageKey = 'sez-demo-auth'
+const staticAuthStorageKey = 'sez-demo-auth-reset-2026-09-03'
+const legacyStaticAuthStorageKeys = ['sez-demo-auth']
 const languageStorageKey = 'sez-language'
-const defaultLanguageId = 'en'
 const defaultInviteCode = 'SEZ2026'
 const emptyWallet = { id: '', balance: 0 }
 const verificationRequiredMessage = 'Upload your ID or passport and face photo to verify your account.'
 const uploadMaxBytes = 3 * 1024 * 1024
 const documentUploadTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
 const faceUploadTypes = ['image/jpeg', 'image/png', 'image/webp']
-const languageOptions = [
-  { id: 'en', label: 'English' },
-  { id: 'ru', label: 'Russian' },
-  { id: 'ka', label: 'Georgian' },
-  { id: 'es', label: 'Spanish' },
-  { id: 'de', label: 'German' },
-  { id: 'tr', label: 'Turkish' },
-  { id: 'fr', label: 'French' },
-  { id: 'it', label: 'Italian' },
-  { id: 'id', label: 'Indonesian' },
-  { id: 'lv', label: 'Latvian' },
-  { id: 'pt', label: 'Portuguese' },
-  { id: 'hu', label: 'Hungarian' },
-  { id: 'pl', label: 'Polish' },
-  { id: 'ro', label: 'Romanian' },
-  { id: 'hy', label: 'Armenian' },
-  { id: 'zh', label: 'Chinese' },
-  { id: 'ko', label: 'Korean' },
-]
 
 function App() {
   const [activeView, setActiveView] = useState('home')
@@ -146,6 +128,14 @@ function App() {
   const [authReady, setAuthReady] = useState(false)
   const [language, setLanguage] = useState(readSavedLanguage)
   const [clockNow, setClockNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    try {
+      for (const storageKey of legacyStaticAuthStorageKeys) window.localStorage.removeItem(storageKey)
+    } catch {
+      // The reset only applies where browser storage is available.
+    }
+  }, [])
 
   const applyAccountPayload = useCallback((payload) => {
     setUser(payload.user)
@@ -217,6 +207,11 @@ function App() {
       // Language still applies for the current browser session.
     }
     document.documentElement.lang = language
+  }, [language])
+
+  useEffect(() => {
+    const root = document.getElementById('root')
+    return observePageTranslations(root, language)
   }, [language])
 
   const filteredTiers = useMemo(() => {
@@ -304,7 +299,7 @@ function App() {
   function updateLanguage(nextLanguage) {
     const option = getLanguageOption(nextLanguage)
     setLanguage(option.id)
-    showNotice(`Language changed to ${option.label}.`)
+    showNotice(formatLanguageChangeNotice(option.id, option))
   }
 
   async function confirmPurchase() {
@@ -1045,10 +1040,6 @@ function readSavedLanguage() {
   } catch {
     return defaultLanguageId
   }
-}
-
-function getLanguageOption(value) {
-  return languageOptions.find((option) => option.id === value) || languageOptions[0]
 }
 
 function findTierPlanByAmount(amount) {

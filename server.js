@@ -16,6 +16,9 @@ const projectedMonthlyRate = 0.24
 const withdrawalFeeRate = 0.16
 const payoutCycleMs = 24 * 60 * 60 * 1000
 const payoutSyncIntervalMs = 60 * 1000
+const rateLimitWindowMs = 15 * 60 * 1000
+const rateLimitBuckets = new Map()
+const secureCookieAttribute = process.env.NODE_ENV === 'production' || process.env.COOKIE_SECURE === '1' ? '; Secure' : ''
 const referralTeams = [
   { level: 1, label: 'Team 1', taskRate: 0.06, depositRate: 0.03 },
   { level: 2, label: 'Team 2', taskRate: 0.03, depositRate: 0.02 },
@@ -23,6 +26,15 @@ const referralTeams = [
 ]
 const maxJsonBodySize = 8 * 1024 * 1024
 const maxUploadBytes = 3 * 1024 * 1024
+const baseSecurityHeaders = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'same-origin',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()',
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Resource-Policy': 'same-origin',
+  'Content-Security-Policy': "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; form-action 'self'",
+}
 
 const tierPlans = [
   { amount: 300, dailyIncome: 17.5 },
@@ -246,6 +258,7 @@ const server = createServer(async (request, response) => {
 
   if (url.pathname.startsWith('/api/')) {
     try {
+      enforceRateLimit(request, url)
       await handleApi(request, response, url)
     } catch (error) {
       const status = error.statusCode || 500
@@ -752,6 +765,35 @@ function readCookies(request) {
   )
 }
 
+function enforceRateLimit(request, url) {
+  const now = Date.now()
+  const routeType = url.pathname.startsWith('/api/auth/') ? 'auth' : request.method === 'GET' ? 'read' : 'write'
+  const maxRequests = routeType === 'auth' ? 30 : routeType === 'write' ? 120 : 600
+  const key = `${routeType}:${getClientIp(request)}`
+  const bucket = rateLimitBuckets.get(key)
+
+  if (!bucket || bucket.resetAt <= now) {
+    rateLimitBuckets.set(key, { count: 1, resetAt: now + rateLimitWindowMs })
+    cleanupRateLimitBuckets(now)
+    return
+  }
+
+  if (bucket.count >= maxRequests) throw httpError(429, 'Too many requests. Try again later.')
+  bucket.count += 1
+}
+
+function cleanupRateLimitBuckets(now) {
+  if (rateLimitBuckets.size < 1000) return
+  for (const [key, bucket] of rateLimitBuckets) {
+    if (bucket.resetAt <= now) rateLimitBuckets.delete(key)
+  }
+}
+
+function getClientIp(request) {
+  const forwardedFor = String(request.headers['x-forwarded-for'] || '').split(',')[0].trim()
+  return forwardedFor || request.socket.remoteAddress || 'unknown'
+}
+
 function toPublicUser(record) {
   return { id: record.id, name: record.name, email: record.email, verified: Boolean(record.verified), inviteCode: record.inviteCode }
 }
@@ -878,15 +920,15 @@ function ensureColumn(tableName, columnName, columnDefinition) {
 }
 
 function sessionCookie(token) {
-  return `sez_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${Math.floor(sessionLifetime / 1000)}`
+  return `sez_session=${token}; HttpOnly; Path=/; SameSite=Strict; Max-Age=${Math.floor(sessionLifetime / 1000)}${secureCookieAttribute}`
 }
 
 function clearSessionCookie() {
-  return 'sez_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0'
+  return `sez_session=; HttpOnly; Path=/; SameSite=Strict; Max-Age=0${secureCookieAttribute}`
 }
 
 function sendJson(response, status, payload, extraHeaders = {}) {
-  response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...extraHeaders })
+  response.writeHead(status, { ...securityHeaders(), 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...extraHeaders })
   response.end(JSON.stringify(payload))
 }
 
@@ -896,15 +938,20 @@ function serveFrontend(response, pathname, headOnly) {
   const filePath = candidate.startsWith(distDir) && existsSync(candidate) && statSync(candidate).isFile() ? candidate : join(distDir, 'index.html')
 
   if (!existsSync(filePath)) {
-    response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+    response.writeHead(404, { ...securityHeaders(), 'Content-Type': 'text/plain; charset=utf-8' })
     response.end('Build the frontend with `npm run build` before starting the production server.')
     return
   }
 
   const content = readFileSync(filePath)
-  response.writeHead(200, { 'Content-Type': mimeTypes[extname(filePath)] || 'application/octet-stream' })
+  response.writeHead(200, { ...securityHeaders(), 'Content-Type': mimeTypes[extname(filePath)] || 'application/octet-stream' })
   if (!headOnly) response.end(content)
   else response.end()
+}
+
+function securityHeaders() {
+  if (!secureCookieAttribute) return baseSecurityHeaders
+  return { ...baseSecurityHeaders, 'Strict-Transport-Security': 'max-age=31536000; includeSubDomains' }
 }
 
 function httpError(statusCode, message) {
