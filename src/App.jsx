@@ -109,6 +109,7 @@ function App() {
   const [notice, setNotice] = useState('')
   const [checkoutTier, setCheckoutTier] = useState(null)
   const [mainingTier, setMainingTier] = useState(null)
+  const [mainingBackView, setMainingBackView] = useState('invest')
   const [selectedCrypto, setSelectedCrypto] = useState('USDT')
   const [purchases, setPurchases] = useState([])
   const [wallet, setWallet] = useState(emptyWallet)
@@ -235,13 +236,15 @@ function App() {
     if (!requireVerifiedAccount()) return
     setSelectedCrypto('USDT')
     setMainingTier(null)
+    setMainingBackView('invest')
     setActiveView('invest')
     setCheckoutTier(tier)
   }
 
-  function showMainingDetails(tier) {
+  function showMainingDetails(tier, backView = 'invest') {
     setCheckoutTier(null)
     setMainingTier(tier)
+    setMainingBackView(backView)
     setActiveView('mainingDetails')
   }
 
@@ -249,6 +252,7 @@ function App() {
     if ((view === 'recharge' || view === 'withdraw') && !requireVerifiedAccount()) return
     setCheckoutTier(null)
     setMainingTier(null)
+    setMainingBackView('invest')
     setActiveView(view)
   }
 
@@ -349,6 +353,7 @@ function App() {
     setVerification(null)
     setCheckoutTier(null)
     setMainingTier(null)
+    setMainingBackView('invest')
     setActiveView('home')
     setAuthMode('login')
     setNotice('')
@@ -373,11 +378,11 @@ function App() {
         <div className="page-content">
           {checkoutTier ? <CheckoutView tier={checkoutTier} crypto={selectedCrypto} wallet={wallet} onCrypto={setSelectedCrypto} onBack={() => setCheckoutTier(null)} onConfirm={confirmPurchase} /> : <>
             {activeView === 'home' && <HomeView onAction={showNotice} onNavigate={navigateTo} onVerify={() => navigateTo('verification')} onHistory={() => navigateTo('wallet')} portfolio={portfolio} activities={activities} user={user} onLogout={logout} />}
-            {activeView === 'invest' && <InvestView filter={tierFilter} onFilter={setTierFilter} tiers={filteredTiers} portfolio={portfolio} purchases={purchases} onReadMore={showMainingDetails} onProfile={() => navigateTo('profile')} />}
-            {activeView === 'mainingDetails' && mainingTier && <MainingDetailsView tier={mainingTier} owned={purchases.some((purchase) => purchase.id === mainingTier.id)} onBack={() => navigateTo('invest')} onBuy={startCheckout} onProfile={() => navigateTo('profile')} />}
+            {activeView === 'invest' && <InvestView filter={tierFilter} onFilter={setTierFilter} tiers={filteredTiers} portfolio={portfolio} purchases={purchases} onReadMore={(tier) => showMainingDetails(tier, 'invest')} onProfile={() => navigateTo('profile')} />}
+            {activeView === 'mainingDetails' && mainingTier && <MainingDetailsView tier={mainingTier} owned={purchases.some((purchase) => purchase.id === mainingTier.id)} onBack={() => navigateTo(mainingBackView)} onBuy={startCheckout} onProfile={() => navigateTo('profile')} />}
             {activeView === 'wallet' && <WalletView onAction={showNotice} onRecharge={() => navigateTo('recharge')} onWithdraw={() => navigateTo('withdraw')} portfolio={portfolio} activities={activities} />}
             {activeView === 'referrals' && <ReferralView user={user} referrals={referrals} onCopy={copyInviteCode} onRefresh={refreshReferrals} />}
-            {activeView === 'profile' && <ProfileView onAction={showNotice} onProfileSettings={() => navigateTo('profileSettings')} onSecurity={() => navigateTo('security')} onReferrals={() => navigateTo('referrals')} onVerification={() => navigateTo('verification')} portfolio={portfolio} purchases={purchases} user={user} verification={verification} onLogout={logout} />}
+            {activeView === 'profile' && <ProfileView onAction={showNotice} onProfileSettings={() => navigateTo('profileSettings')} onSecurity={() => navigateTo('security')} onReferrals={() => navigateTo('referrals')} onVerification={() => navigateTo('verification')} onReadMore={(tier) => showMainingDetails(tier, 'profile')} portfolio={portfolio} purchases={purchases} user={user} verification={verification} onLogout={logout} />}
             {activeView === 'recharge' && <RechargeView wallet={wallet} onBack={() => setActiveView('wallet')} onRecharge={submitRecharge} />}
             {activeView === 'withdraw' && <WithdrawView onBack={() => setActiveView('wallet')} onWithdraw={submitWithdrawal} portfolio={portfolio} />}
             {activeView === 'profileSettings' && <ProfileSettingsView user={user} onBack={() => setActiveView('profile')} onSave={updateProfile} />}
@@ -514,7 +519,7 @@ function WalletView({ onAction, onRecharge, onWithdraw, portfolio, activities })
   )
 }
 
-function ProfileView({ onAction, onProfileSettings, onSecurity, onReferrals, onVerification, portfolio, purchases, user, verification, onLogout }) {
+function ProfileView({ onAction, onProfileSettings, onSecurity, onReferrals, onVerification, onReadMore, portfolio, purchases, user, verification, onLogout }) {
   const verificationLabel = user.verified ? 'Verified' : 'Unverified'
   const verificationDate = verification?.createdAt ? `Verified ${formatShortDate(verification.createdAt)}` : 'ID/passport and face photo required'
 
@@ -523,7 +528,7 @@ function ProfileView({ onAction, onProfileSettings, onSecurity, onReferrals, onV
       <section className="profile-hero"><div className="large-avatar">{user.name.slice(0, 1).toUpperCase()}</div><div><p className="eyebrow">Member Account</p><h1>{user.name}</h1><p>{user.email}</p><span className={`verification-pill${user.verified ? ' verified' : ''}`}>{verificationLabel}</span></div></section>
       <section className="profile-grid"><Metric label="Wallet" value={formatMoney(portfolio.walletBalance)} /><Metric label="Active Plans" value={String(portfolio.activeTiers)} /><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label="1 Month Result" value={formatMoney(portfolio.oneMonthResult)} /></section>
       {!user.verified && <VerificationBanner onVerify={onVerification} />}
-      <section className="purchased-panel"><SectionHeader title="Purchased Plans" action={`${portfolio.activeTiers} active`} onAction={() => onAction('Your purchased plans are shown below.')} /><PurchasedTiers purchases={purchases} /></section>
+      <section className="purchased-panel"><SectionHeader title="Purchased Plans" action={`${portfolio.activeTiers} active`} onAction={() => onAction('Your purchased plans are shown below.')} /><PurchasedTiers purchases={purchases} onReadMore={onReadMore} /></section>
       <section className="settings-list">
         <button type="button" onClick={onVerification}><span><Icon name="upload" />Verification</span><small>{verificationDate}</small><Icon name="chevron" /></button>
         <button type="button" onClick={onProfileSettings}><span><Icon name="user" />Profile settings</span><Icon name="chevron" /></button>
@@ -629,11 +634,11 @@ function ActivityList({ items, emptyMessage }) {
   return <section className="activity-list">{items.map((item, index) => <article className="activity-row" key={`${item.title}-${item.time}-${index}`}><div className={`activity-icon ${item.tone}`}><Icon name={item.type} /></div><div className="activity-copy"><h3>{item.title}</h3><p>{item.time}</p></div><strong className={item.amount.startsWith('+') ? 'positive' : 'negative'}>{item.amount}</strong></article>)}</section>
 }
 
-function PurchasedTiers({ purchases }) {
+function PurchasedTiers({ purchases, onReadMore }) {
   if (!purchases.length) return <div className="empty-state purchased-empty"><Icon name="grid" /><p>No plan purchased yet</p></div>
   return <div className="purchased-list">{purchases.map((purchase) => {
     const projection = getTierProjection(purchase.price, purchase.monthlyRate)
-    return <article className="purchased-tier" key={purchase.id} style={{ '--accent': purchase.color }}><div><span className="vip-pill"><span />{purchase.level}</span><h3>{purchase.title}</h3><p>Daily {formatMoney(projection.dailyIncome)} - 1 month {formatMoney(projection.monthResult)}</p></div><strong>{formatMoney(purchase.price)}</strong></article>
+    return <article className="purchased-tier" key={purchase.id} style={{ '--accent': purchase.color }}><div><span className="vip-pill"><span />{purchase.level}</span><h3>{purchase.title}</h3><p>Daily {formatMoney(projection.dailyIncome)} - 1 month {formatMoney(projection.monthResult)}</p></div><div className="purchased-tier-actions"><strong>{formatMoney(purchase.price)}</strong><button type="button" onClick={() => onReadMore(purchase)}>Read More</button></div></article>
   })}</div>
 }
 

@@ -156,6 +156,45 @@ h1 { font-size: 20px; line-height: 1.15; }
   outline-offset: 3px;
 }
 
+.purchased-tier > div:first-child {
+  min-width: 0;
+}
+
+.purchased-tier-actions {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 9px;
+  justify-items: end;
+}
+
+.purchased-tier-actions strong {
+  color: var(--accent);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 17px;
+  white-space: nowrap;
+}
+
+.purchased-tier-actions button {
+  min-height: 30px;
+  padding: 0 11px;
+  border: 1px solid color-mix(in srgb, var(--accent) 44%, transparent);
+  border-radius: 9px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.purchased-tier-actions button:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.purchased-tier-actions button:focus-visible {
+  outline: 2px solid #a983ff;
+  outline-offset: 3px;
+}
+
 @media (min-width: 880px) {
   .message-fab {
     right: 38px;
