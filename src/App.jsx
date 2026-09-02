@@ -8,6 +8,7 @@ const navItems = [
   { id: 'invest', label: 'Invest', icon: 'grid' },
   { id: 'wallet', label: 'Wallet', icon: 'wallet' },
   { id: 'referrals', label: 'Refer', icon: 'send' },
+  { id: 'support', label: 'Support', icon: 'support' },
   { id: 'profile', label: 'Profile', icon: 'user' },
 ]
 
@@ -16,6 +17,7 @@ const pageMeta = {
   invest: { eyebrow: 'Investment portfolio', title: 'Maining plans' },
   wallet: { eyebrow: 'Account funds', title: 'Wallet' },
   referrals: { eyebrow: 'Member network', title: 'Referrals' },
+  support: { eyebrow: 'Customer help', title: 'Support' },
   profile: { eyebrow: 'Account management', title: 'Profile' },
   mainingDetails: { eyebrow: 'Maining details', title: 'Read more' },
   recharge: { eyebrow: 'Account funds', title: 'Recharge' },
@@ -431,6 +433,7 @@ function App() {
             {activeView === 'mainingDetails' && mainingTier && <MainingDetailsView tier={mainingPurchase || mainingTier} owned={Boolean(mainingPurchase)} payoutTimer={getPurchasePayoutTimer(mainingPurchase, clockNow)} onBack={() => navigateTo(mainingBackView)} onBuy={startCheckout} />}
             {activeView === 'wallet' && <WalletView onAction={showNotice} onRecharge={() => navigateTo('recharge')} onWithdraw={() => navigateTo('withdraw')} portfolio={portfolio} payoutTimer={payoutTimer} activities={activities} />}
             {activeView === 'referrals' && <ReferralView user={user} referrals={referrals} onCopy={copyInviteCode} onRefresh={refreshReferrals} />}
+            {activeView === 'support' && <SupportView onAction={showNotice} />}
             {activeView === 'profile' && <ProfileView onAction={showNotice} onProfileSettings={() => navigateTo('profileSettings')} onLanguage={() => navigateTo('language')} onSecurity={() => navigateTo('security')} onReferrals={() => navigateTo('referrals')} onVerification={() => navigateTo('verification')} onReadMore={(tier) => showMainingDetails(tier, 'profile')} portfolio={portfolio} payoutTimer={payoutTimer} purchases={purchases} now={clockNow} user={user} verification={verification} language={selectedLanguage} onLogout={logout} />}
             {activeView === 'recharge' && <RechargeView wallet={wallet} onBack={() => setActiveView('wallet')} onRecharge={submitRecharge} />}
             {activeView === 'withdraw' && <WithdrawView onBack={() => setActiveView('wallet')} onWithdraw={submitWithdrawal} portfolio={portfolio} />}
@@ -636,6 +639,27 @@ function ReferralView({ user, referrals, onCopy, onRefresh }) {
 function ReferralList({ referrals }) {
   if (!referrals.length) return <div className="empty-state purchased-empty"><Icon name="send" /><p>No team members yet</p></div>
   return <div className="referral-list">{referrals.map((referral) => <article className="referral-row" key={referral.id}><div><span className="team-tag">{referral.team || `Team ${referral.level || 1}`}</span><h3>{referral.name}</h3><p>{referral.email}</p></div><div className="referral-meta"><strong>{formatShortDate(referral.createdAt)}</strong><small>Task {formatPercent(referral.taskRate)} / Deposit {formatPercent(referral.depositRate)}</small></div></article>)}</div>
+}
+
+function SupportView({ onAction }) {
+  return (
+    <>
+      <section className="support-hero">
+        <div>
+          <p className="eyebrow">Support center</p>
+          <h1>Customer Support</h1>
+          <p>Contact the support bot for account, wallet, verification, and Maining plan help.</p>
+        </div>
+        <a href={telegramSupportUrl} target="_blank" rel="noreferrer"><Icon name="send" />Open Bot</a>
+      </section>
+      <section className="support-grid">
+        <button type="button" onClick={() => onAction('Use the Telegram bot for account access help.')}><span><Icon name="user" />Account</span><Icon name="chevron" /></button>
+        <button type="button" onClick={() => onAction('Use the Telegram bot for recharge and withdrawal help.')}><span><Icon name="wallet" />Wallet</span><Icon name="chevron" /></button>
+        <button type="button" onClick={() => onAction('Use the Telegram bot for verification help.')}><span><Icon name="upload" />Verification</span><Icon name="chevron" /></button>
+        <button type="button" onClick={() => onAction('Use the Telegram bot for Maining plan help.')}><span><Icon name="grid" />Maining Plans</span><Icon name="chevron" /></button>
+      </section>
+    </>
+  )
 }
 
 function TierCard({ tier, owned, now, onReadMore }) {
