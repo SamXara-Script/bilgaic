@@ -652,7 +652,7 @@ function TierCard({ tier, owned, now, onReadMore }) {
       <div className="risk-track"><span style={{ width: `${tier.riskValue}%` }} /></div>
       <div className="tier-stats"><Metric label="Daily Income" value={formatMoney(projection.dailyIncome)} /><Metric label={`${profitWindowDays} Day Profit`} value={formatMoney(projection.periodProfit)} /><Metric label="1 Month Result" value={formatMoney(projection.monthResult)} /></div>
       {payoutTimer && <PayoutTimer timer={payoutTimer} />}
-      <PrimaryButton label="Read More" onClick={() => onReadMore(tier)} />
+      {!owned && <PrimaryButton label="Read More" onClick={() => onReadMore(tier)} />}
     </article>
   )
 }
