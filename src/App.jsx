@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import './App.css'
 import { BottomNav, SideNav } from './components/navbar.jsx'
 import { IconButton, PrimaryButton, SegmentButton } from './components/button.jsx'
@@ -13,10 +13,11 @@ const navItems = [
 
 const pageMeta = {
   home: { eyebrow: 'Investor dashboard', title: 'Overview' },
-  invest: { eyebrow: 'Investment portfolio', title: 'Investment tiers' },
+  invest: { eyebrow: 'Investment portfolio', title: 'Maining plans' },
   wallet: { eyebrow: 'Account funds', title: 'Wallet' },
   referrals: { eyebrow: 'Member network', title: 'Referrals' },
   profile: { eyebrow: 'Account management', title: 'Profile' },
+  mainingDetails: { eyebrow: 'Maining details', title: 'Read more' },
   recharge: { eyebrow: 'Account funds', title: 'Recharge' },
   withdraw: { eyebrow: 'Account funds', title: 'Withdraw' },
   security: { eyebrow: 'Account protection', title: 'Security' },
@@ -38,6 +39,8 @@ const cryptoOptions = [
 
 const projectedMonthlyRate = 0.24
 const withdrawalFeeRate = 0.16
+const vipDailyPayoutHour = 16
+const telegramSupportUrl = 'https://t.me/+J82Rio5xns1lY2Ni'
 const referralTeams = [
   { level: 1, label: 'Team 1', taskRate: 0.06, depositRate: 0.03 },
   { level: 2, label: 'Team 2', taskRate: 0.03, depositRate: 0.02 },
@@ -72,8 +75,8 @@ const tiers = tierPlans.map(({ amount: price, dailyIncome }, index) => {
 
   return {
     id: tierIds[index] || `vip-${index + 1}`,
-    level: `VIP ${index + 1}`,
-    title: `Sez VIP ${index + 1}`,
+    level: `Maining ${index + 1}`,
+    title: `Maining Plan ${index + 1}`,
     price,
     dailyIncome,
     investment: formatCompactMoney(price),
@@ -86,7 +89,7 @@ const tiers = tierPlans.map(({ amount: price, dailyIncome }, index) => {
 })
 
 const tierFilters = [
-  { id: 'all', label: 'All Tiers', matches: () => true },
+  { id: 'all', label: 'All Plans', matches: () => true },
   { id: 'entry', label: '$300-$1,500', matches: (tier) => tier.price <= 1500 },
   { id: 'growth', label: '$2,000-$5,000', matches: (tier) => tier.price >= 2000 && tier.price <= 5000 },
   { id: 'pro', label: '$10,000-$50,000', matches: (tier) => tier.price >= 10000 },
@@ -105,6 +108,7 @@ function App() {
   const [tierFilter, setTierFilter] = useState('all')
   const [notice, setNotice] = useState('')
   const [checkoutTier, setCheckoutTier] = useState(null)
+  const [mainingTier, setMainingTier] = useState(null)
   const [selectedCrypto, setSelectedCrypto] = useState('USDT')
   const [purchases, setPurchases] = useState([])
   const [wallet, setWallet] = useState(emptyWallet)
@@ -115,6 +119,15 @@ function App() {
   const [authMode, setAuthMode] = useState('login')
   const [authReady, setAuthReady] = useState(false)
 
+  const applyAccountPayload = useCallback((payload) => {
+    setUser(payload.user)
+    setWallet(toClientWallet(payload.wallet))
+    setPurchases((payload.purchases || []).map(toClientPurchase))
+    setTransactions((payload.transactions || []).map(toClientTransaction))
+    setReferrals(payload.referrals || [])
+    setVerification(payload.verification || null)
+  }, [])
+
   useEffect(() => {
     let active = true
 
@@ -122,12 +135,7 @@ function App() {
       try {
         const session = await requestApi('/api/session')
         if (!active) return
-        setUser(session.user)
-        setWallet(toClientWallet(session.wallet))
-        setPurchases(session.purchases.map(toClientPurchase))
-        setTransactions((session.transactions || []).map(toClientTransaction))
-        setReferrals(session.referrals || [])
-        setVerification(session.verification || null)
+        applyAccountPayload(session)
       } catch {
         // The login screen remains available while the API is offline.
       } finally {
@@ -137,7 +145,37 @@ function App() {
 
     restoreSession()
     return () => { active = false }
-  }, [])
+  }, [applyAccountPayload])
+
+  useEffect(() => {
+    if (!user?.id) return undefined
+
+    let active = true
+    let timeoutId = 0
+
+    async function refreshAfterPayout() {
+      try {
+        const session = await requestApi('/api/session')
+        if (active) applyAccountPayload(session)
+      } catch {
+        // The next normal API request will retry payout sync.
+      } finally {
+        if (active) scheduleRefresh()
+      }
+    }
+
+    function scheduleRefresh() {
+      const nextRefresh = getNextVipPayoutRefreshDate()
+      const delay = Math.max(nextRefresh.getTime() - Date.now(), 1000)
+      timeoutId = window.setTimeout(refreshAfterPayout, Math.min(delay, 2147483647))
+    }
+
+    scheduleRefresh()
+    return () => {
+      active = false
+      window.clearTimeout(timeoutId)
+    }
+  }, [applyAccountPayload, user?.id])
 
   const filteredTiers = useMemo(() => {
     const selectedFilter = tierFilters.find((filter) => filter.id === tierFilter) || tierFilters[0]
@@ -188,6 +226,7 @@ function App() {
   function requireVerifiedAccount() {
     if (user?.verified) return true
     showNotice(verificationRequiredMessage)
+    setMainingTier(null)
     setActiveView('verification')
     return false
   }
@@ -195,12 +234,21 @@ function App() {
   function startCheckout(tier) {
     if (!requireVerifiedAccount()) return
     setSelectedCrypto('USDT')
+    setMainingTier(null)
+    setActiveView('invest')
     setCheckoutTier(tier)
+  }
+
+  function showMainingDetails(tier) {
+    setCheckoutTier(null)
+    setMainingTier(tier)
+    setActiveView('mainingDetails')
   }
 
   function navigateTo(view) {
     if ((view === 'recharge' || view === 'withdraw') && !requireVerifiedAccount()) return
     setCheckoutTier(null)
+    setMainingTier(null)
     setActiveView(view)
   }
 
@@ -212,6 +260,7 @@ function App() {
       setWallet(toClientWallet(result.wallet))
       setTransactions((result.transactions || []).map(toClientTransaction))
       setCheckoutTier(null)
+      setMainingTier(null)
       setActiveView('profile')
       showNotice(`${checkoutTier.title} was added to your profile.`)
     } catch (error) {
@@ -235,7 +284,7 @@ function App() {
     setUser(result.user)
     setVerification(result.verification || null)
     setActiveView('profile')
-    showNotice('Account verified. You can now add balance and buy VIP tiers.')
+    showNotice('Account verified. You can now add balance and buy Maining plans.')
   }
 
   async function submitRecharge({ amount, crypto, network }) {
@@ -282,6 +331,7 @@ function App() {
     setVerification(result.verification || null)
     setActiveView(result.user?.verified ? 'home' : 'verification')
     setCheckoutTier(null)
+    setMainingTier(null)
     if (!result.user?.verified) showNotice(verificationRequiredMessage)
   }
 
@@ -298,6 +348,7 @@ function App() {
     setReferrals([])
     setVerification(null)
     setCheckoutTier(null)
+    setMainingTier(null)
     setActiveView('home')
     setAuthMode('login')
     setNotice('')
@@ -313,7 +364,7 @@ function App() {
 
   return (
     <main className="app-shell">
-      <SideNav items={navItems} activeId={activeView} onSelect={setActiveView} onLogout={logout} />
+      <SideNav items={navItems} activeId={activeView} onSelect={navigateTo} onLogout={logout} supportUrl={telegramSupportUrl} />
       <div className="workspace">
         <header className="desktop-topbar">
           <div><p className="eyebrow">{currentPage.eyebrow}</p><h2>{currentPage.title}</h2></div>
@@ -321,8 +372,9 @@ function App() {
         </header>
         <div className="page-content">
           {checkoutTier ? <CheckoutView tier={checkoutTier} crypto={selectedCrypto} wallet={wallet} onCrypto={setSelectedCrypto} onBack={() => setCheckoutTier(null)} onConfirm={confirmPurchase} /> : <>
-            {activeView === 'home' && <HomeView onAction={showNotice} onNavigate={navigateTo} onVerify={() => setActiveView('verification')} onHistory={() => setActiveView('wallet')} portfolio={portfolio} activities={activities} user={user} onLogout={logout} />}
-            {activeView === 'invest' && <InvestView filter={tierFilter} onFilter={setTierFilter} tiers={filteredTiers} portfolio={portfolio} purchases={purchases} onInvest={startCheckout} onProfile={() => setActiveView('profile')} onSupport={showNotice} />}
+            {activeView === 'home' && <HomeView onAction={showNotice} onNavigate={navigateTo} onVerify={() => navigateTo('verification')} onHistory={() => navigateTo('wallet')} portfolio={portfolio} activities={activities} user={user} onLogout={logout} />}
+            {activeView === 'invest' && <InvestView filter={tierFilter} onFilter={setTierFilter} tiers={filteredTiers} portfolio={portfolio} purchases={purchases} onReadMore={showMainingDetails} onProfile={() => navigateTo('profile')} />}
+            {activeView === 'mainingDetails' && mainingTier && <MainingDetailsView tier={mainingTier} owned={purchases.some((purchase) => purchase.id === mainingTier.id)} onBack={() => navigateTo('invest')} onBuy={startCheckout} onProfile={() => navigateTo('profile')} />}
             {activeView === 'wallet' && <WalletView onAction={showNotice} onRecharge={() => navigateTo('recharge')} onWithdraw={() => navigateTo('withdraw')} portfolio={portfolio} activities={activities} />}
             {activeView === 'referrals' && <ReferralView user={user} referrals={referrals} onCopy={copyInviteCode} onRefresh={refreshReferrals} />}
             {activeView === 'profile' && <ProfileView onAction={showNotice} onProfileSettings={() => navigateTo('profileSettings')} onSecurity={() => navigateTo('security')} onReferrals={() => navigateTo('referrals')} onVerification={() => navigateTo('verification')} portfolio={portfolio} purchases={purchases} user={user} verification={verification} onLogout={logout} />}
@@ -336,7 +388,8 @@ function App() {
       </div>
 
       {notice && <div className="toast" role="status">{notice}</div>}
-      <BottomNav items={navItems} activeId={activeView} onSelect={setActiveView} />
+      <TelegramSupportButton />
+      <BottomNav items={navItems} activeId={activeView} onSelect={navigateTo} />
     </main>
   )
 }
@@ -373,8 +426,9 @@ function AuthScreen({ mode, onModeChange, onAuthenticate }) {
   }
 
   return <main className="auth-shell">
-    <section className="auth-visual" aria-hidden="true"><div className="auth-brand">SEZ<span /></div><div className="auth-visual-copy"><p>Secure investing workspace</p><h1>Invest with a clearer view.</h1><div><strong>$0.00</strong><span>Start with a personal wallet and choose your first tier when ready.</span></div></div></section>
+    <section className="auth-visual" aria-hidden="true"><div className="auth-brand">SEZ<span /></div><div className="auth-visual-copy"><p>Secure investing workspace</p><h1>Invest with a clearer view.</h1><div><strong>$0.00</strong><span>Start with a personal wallet and choose your first plan when ready.</span></div></div></section>
     <section className="auth-main"><div className="auth-card"><div className="auth-mobile-brand">SEZ<span /></div><p className="eyebrow">Customer access</p><h1>{isRegister ? 'Create your account' : 'Welcome back'}</h1><p className="auth-subtitle">{isRegister ? 'Enter a member invite code to open your investor profile.' : 'Sign in to your investor workspace.'}</p><form onSubmit={submit}>{isRegister && <label>Full name<input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" required /></label>}<label>Email address<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label><label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={isRegister ? 'new-password' : 'current-password'} minLength="8" required /></label>{isRegister && <label>Invite code<input value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} autoComplete="off" required /></label>}{error && <p className="auth-error" role="alert">{error}</p>}<button className="auth-submit" type="submit" disabled={submitting}>{submitting ? 'Please wait...' : isRegister ? 'Create account' : 'Log in'}</button></form><p className="auth-switch">{isRegister ? 'Already have an account?' : 'New to SEZ?'} <button type="button" onClick={switchMode}>{isRegister ? 'Log in' : 'Create account'}</button></p></div></section>
+    <TelegramSupportButton />
   </main>
 }
 
@@ -426,22 +480,21 @@ function HomeView({ onAction, onNavigate, onVerify, onHistory, portfolio, activi
   )
 }
 
-function InvestView({ filter, onFilter, tiers: tierItems, portfolio, purchases, onInvest, onProfile, onSupport }) {
+function InvestView({ filter, onFilter, tiers: tierItems, portfolio, purchases, onReadMore, onProfile }) {
   return (
     <>
       <section className="investment-summary">
         <div className="summary-topline">
-          <div><p className="eyebrow">Investment</p><h1>Sez Devices</h1></div>
-          <div className="active-tier"><span>Active</span><strong>{portfolio.activeTiers} Tiers</strong></div>
+          <div><p className="eyebrow">Investment</p><h1>Maining Devices</h1></div>
+          <div className="active-tier"><span>Active</span><strong>{portfolio.activeTiers} Plans</strong></div>
         </div>
         <div className="summary-metrics"><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label="1 Month Result" value={formatMoney(portfolio.oneMonthResult)} /></div>
       </section>
 
-      <div className="filter-row" role="tablist" aria-label="Investment tiers">
+      <div className="filter-row" role="tablist" aria-label="Maining plans">
         {tierFilters.map((item) => <SegmentButton key={item.id} label={item.label} active={filter === item.id} onClick={() => onFilter(item.id)} />)}
       </div>
-      <section className="tier-list">{tierItems.map((tier) => <TierCard key={tier.id} tier={tier} owned={purchases.some((purchase) => purchase.id === tier.id)} onInvest={onInvest} onProfile={onProfile} />)}</section>
-      <button className="message-fab" type="button" aria-label="Contact support" onClick={() => onSupport('Support is currently unavailable.')}><Icon name="send" /></button>
+      <section className="tier-list">{tierItems.map((tier) => <TierCard key={tier.id} tier={tier} owned={purchases.some((purchase) => purchase.id === tier.id)} onReadMore={onReadMore} onProfile={onProfile} />)}</section>
     </>
   )
 }
@@ -454,7 +507,7 @@ function WalletView({ onAction, onRecharge, onWithdraw, portfolio, activities })
         <div className="wallet-identity"><span>Wallet ID</span><strong>{portfolio.walletId || 'Not assigned'}</strong></div>
         <div className="wallet-buttons"><PrimaryButton label="Recharge" icon="plus" onClick={onRecharge} /><PrimaryButton label="Withdraw" icon="arrow-up" secondary onClick={onWithdraw} /></div>
       </section>
-      <section className="wallet-stats"><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label="Weekly Income" value={formatMoney(portfolio.weeklyIncome)} green /><Metric label="1 Month Profit" value={formatMoney(portfolio.earnings)} /><Metric label="Active Tiers" value={String(portfolio.activeTiers)} /></section>
+      <section className="wallet-stats"><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label="Weekly Income" value={formatMoney(portfolio.weeklyIncome)} green /><Metric label="1 Month Profit" value={formatMoney(portfolio.earnings)} /><Metric label="Active Plans" value={String(portfolio.activeTiers)} /></section>
       <SectionHeader title="Recent Activity" action="History" onAction={() => onAction('Wallet history is up to date.')} />
       <ActivityList items={activities} emptyMessage="No transactions yet" />
     </>
@@ -468,9 +521,9 @@ function ProfileView({ onAction, onProfileSettings, onSecurity, onReferrals, onV
   return (
     <>
       <section className="profile-hero"><div className="large-avatar">{user.name.slice(0, 1).toUpperCase()}</div><div><p className="eyebrow">Member Account</p><h1>{user.name}</h1><p>{user.email}</p><span className={`verification-pill${user.verified ? ' verified' : ''}`}>{verificationLabel}</span></div></section>
-      <section className="profile-grid"><Metric label="Wallet" value={formatMoney(portfolio.walletBalance)} /><Metric label="Active Tiers" value={String(portfolio.activeTiers)} /><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label="1 Month Result" value={formatMoney(portfolio.oneMonthResult)} /></section>
+      <section className="profile-grid"><Metric label="Wallet" value={formatMoney(portfolio.walletBalance)} /><Metric label="Active Plans" value={String(portfolio.activeTiers)} /><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label="1 Month Result" value={formatMoney(portfolio.oneMonthResult)} /></section>
       {!user.verified && <VerificationBanner onVerify={onVerification} />}
-      <section className="purchased-panel"><SectionHeader title="Purchased Tiers" action={`${portfolio.activeTiers} active`} onAction={() => onAction('Your purchased tiers are shown below.')} /><PurchasedTiers purchases={purchases} /></section>
+      <section className="purchased-panel"><SectionHeader title="Purchased Plans" action={`${portfolio.activeTiers} active`} onAction={() => onAction('Your purchased plans are shown below.')} /><PurchasedTiers purchases={purchases} /></section>
       <section className="settings-list">
         <button type="button" onClick={onVerification}><span><Icon name="upload" />Verification</span><small>{verificationDate}</small><Icon name="chevron" /></button>
         <button type="button" onClick={onProfileSettings}><span><Icon name="user" />Profile settings</span><Icon name="chevron" /></button>
@@ -525,21 +578,46 @@ function ReferralList({ referrals }) {
   return <div className="referral-list">{referrals.map((referral) => <article className="referral-row" key={referral.id}><div><span className="team-tag">{referral.team || `Team ${referral.level || 1}`}</span><h3>{referral.name}</h3><p>{referral.email}</p></div><div className="referral-meta"><strong>{formatShortDate(referral.createdAt)}</strong><small>Task {formatPercent(referral.taskRate)} / Deposit {formatPercent(referral.depositRate)}</small></div></article>)}</div>
 }
 
-function TierCard({ tier, owned, onInvest, onProfile }) {
+function TierCard({ tier, owned, onReadMore, onProfile }) {
   const projection = getTierProjection(tier.price, tier.monthlyRate)
 
   return (
     <article className="tier-card" style={{ '--accent': tier.color, '--accent-shadow': tier.shadow }}>
       <div className="tier-heading">
         <div><span className="vip-pill"><span />{tier.level}</span><h2>{tier.title}</h2></div>
-        <div className="tier-price"><p className="micro-label">Invest</p><strong>{tier.investment}</strong></div>
+        <div className="tier-price"><p className="micro-label">Price</p><strong>{tier.investment}</strong></div>
       </div>
       <div className="risk-row"><span className="micro-label">Daily Payout</span><strong>{tier.risk}</strong></div>
       <div className="risk-track"><span style={{ width: `${tier.riskValue}%` }} /></div>
       <div className="tier-stats"><Metric label="Daily Income" value={formatMoney(projection.dailyIncome)} /><Metric label="Weekly Income" value={formatMoney(projection.weeklyIncome)} /><Metric label="1 Month Result" value={formatMoney(projection.monthResult)} /></div>
-      <PrimaryButton label={owned ? 'View Profile' : 'Invest Now'} onClick={() => owned ? onProfile() : onInvest(tier)} />
+      <PrimaryButton label={owned ? 'View Profile' : 'Read More'} onClick={() => owned ? onProfile() : onReadMore(tier)} />
     </article>
   )
+}
+
+function MainingDetailsView({ tier, owned, onBack, onBuy, onProfile }) {
+  const projection = getTierProjection(tier.price, tier.monthlyRate)
+
+  return <section className="detail-page maining-page" style={{ '--accent': tier.color, '--accent-shadow': tier.shadow }}>
+    <button className="subpage-back" type="button" onClick={onBack}><Icon name="arrow-left" />Back to maining</button>
+    <div className="detail-grid">
+      <section className="maining-panel">
+        <p className="eyebrow">Maining plan</p>
+        <span className="vip-pill"><span />{tier.level}</span>
+        <h1>{tier.title}</h1>
+        <p>Maining is a customer plan that connects your account balance to a selected mining package. The dashboard tracks the plan price, daily payout, weekly income, and 1 month result.</p>
+        <div className="maining-metrics"><Metric label="Plan Price" value={formatMoney(tier.price)} /><Metric label="Daily Payout" value={formatMoney(projection.dailyIncome)} green /><Metric label="Weekly Income" value={formatMoney(projection.weeklyIncome)} /><Metric label="1 Month Result" value={formatMoney(projection.monthResult)} /></div>
+        <PrimaryButton label={owned ? 'View Profile' : 'Buy Now'} icon="check" onClick={() => owned ? onProfile() : onBuy(tier)} />
+      </section>
+      <section className="info-panel maining-info">
+        <p className="eyebrow">How it works</p>
+        <h2>What Maining uses</h2>
+        <div className="maining-copy"><h3>Mining equipment</h3><p>Maining plans are presented as access to managed mining devices that produce daily account income after the payout time.</p></div>
+        <div className="maining-copy"><h3>Power and network pools</h3><p>The operation uses electricity capacity, network mining pools, and wallet settlement to calculate the daily payout shown on each plan.</p></div>
+        <div className="maining-copy"><h3>Wallet balance</h3><p>After purchase, the plan income is credited to the customer wallet at 4:00 PM each day when the account is active.</p></div>
+      </section>
+    </div>
+  </section>
 }
 
 function OverviewCard({ item }) {
@@ -552,7 +630,7 @@ function ActivityList({ items, emptyMessage }) {
 }
 
 function PurchasedTiers({ purchases }) {
-  if (!purchases.length) return <div className="empty-state purchased-empty"><Icon name="grid" /><p>No tier purchased yet</p></div>
+  if (!purchases.length) return <div className="empty-state purchased-empty"><Icon name="grid" /><p>No plan purchased yet</p></div>
   return <div className="purchased-list">{purchases.map((purchase) => {
     const projection = getTierProjection(purchase.price, purchase.monthlyRate)
     return <article className="purchased-tier" key={purchase.id} style={{ '--accent': purchase.color }}><div><span className="vip-pill"><span />{purchase.level}</span><h3>{purchase.title}</h3><p>Daily {formatMoney(projection.dailyIncome)} - 1 month {formatMoney(projection.monthResult)}</p></div><strong>{formatMoney(purchase.price)}</strong></article>
@@ -562,10 +640,10 @@ function PurchasedTiers({ purchases }) {
 function CheckoutView({ tier, crypto, wallet, onCrypto, onBack, onConfirm }) {
   const selectedOption = cryptoOptions.find((option) => option.id === crypto)
   return <section className="checkout-page" style={{ '--accent': tier.color, '--accent-shadow': tier.shadow }}>
-    <button className="checkout-back" type="button" onClick={onBack}><Icon name="arrow-left" />Back to tiers</button>
+    <button className="checkout-back" type="button" onClick={onBack}><Icon name="arrow-left" />Back to plans</button>
     <div className="checkout-grid">
-      <div className="checkout-intro"><p className="eyebrow">Customer purchase</p><h1>Buy {tier.title}</h1><p>Choose a cryptocurrency to complete your investment purchase.</p><div className="checkout-product"><span className="vip-pill"><span />{tier.level}</span><h2>{tier.title}</h2><strong>{formatMoney(tier.price)}</strong><div className="risk-row"><span className="micro-label">Daily Payout</span><strong>{tier.risk}</strong></div><div className="risk-track"><span style={{ width: `${tier.riskValue}%` }} /></div></div></div>
-      <div className="checkout-payment"><p className="eyebrow">Wallet payment</p><h2>Select cryptocurrency</h2><div className="crypto-options">{cryptoOptions.map((option) => <button key={option.id} className={crypto === option.id ? 'active' : ''} type="button" onClick={() => onCrypto(option.id)}><span className={`crypto-mark ${option.tone}`}>{option.id.slice(0, 1)}</span><span><strong>{option.id}</strong><small>{option.name}</small></span><Icon name="check" /></button>)}</div><div className="payment-total"><span>Amount due</span><strong>{selectedOption.quantity(tier.price)}</strong><small>{formatMoney(tier.price)} from wallet {wallet.id}</small></div><PrimaryButton label="Confirm Wallet Payment" icon="check" onClick={onConfirm} /><p className="payment-note">Your wallet balance must cover this tier before purchase.</p></div>
+      <div className="checkout-intro"><p className="eyebrow">Customer purchase</p><h1>Buy {tier.title}</h1><p>Choose a cryptocurrency to complete your Maining purchase.</p><div className="checkout-product"><span className="vip-pill"><span />{tier.level}</span><h2>{tier.title}</h2><strong>{formatMoney(tier.price)}</strong><div className="risk-row"><span className="micro-label">Daily Payout</span><strong>{tier.risk}</strong></div><div className="risk-track"><span style={{ width: `${tier.riskValue}%` }} /></div></div></div>
+      <div className="checkout-payment"><p className="eyebrow">Wallet payment</p><h2>Select cryptocurrency</h2><div className="crypto-options">{cryptoOptions.map((option) => <button key={option.id} className={crypto === option.id ? 'active' : ''} type="button" onClick={() => onCrypto(option.id)}><span className={`crypto-mark ${option.tone}`}>{option.id.slice(0, 1)}</span><span><strong>{option.id}</strong><small>{option.name}</small></span><Icon name="check" /></button>)}</div><div className="payment-total"><span>Amount due</span><strong>{selectedOption.quantity(tier.price)}</strong><small>{formatMoney(tier.price)} from wallet {wallet.id}</small></div><PrimaryButton label="Confirm Wallet Payment" icon="check" onClick={onConfirm} /><p className="payment-note">Your wallet balance must cover this plan before purchase.</p></div>
     </div>
   </section>
 }
@@ -727,7 +805,7 @@ function SecurityView({ user, onBack, onAction, onPasswordChange, onVerification
       <section className="info-panel security-panel">
         <p className="eyebrow">Account protection</p>
         <h2>{user.email}</h2>
-        <button className={`toggle-row${user.verified ? ' active' : ''}`} type="button" onClick={() => user.verified ? onAction('Your account is verified for recharge and tier purchases.') : onVerification()}><span><Icon name={user.verified ? 'check' : 'upload'} />Customer verification</span><strong>{user.verified ? 'Verified' : 'Unverified'}</strong></button>
+        <button className={`toggle-row${user.verified ? ' active' : ''}`} type="button" onClick={() => user.verified ? onAction('Your account is verified for recharge and Maining purchases.') : onVerification()}><span><Icon name={user.verified ? 'check' : 'upload'} />Customer verification</span><strong>{user.verified ? 'Verified' : 'Unverified'}</strong></button>
         <button className={`toggle-row${twoFactorEnabled ? ' active' : ''}`} type="button" onClick={() => setTwoFactorEnabled((enabled) => !enabled)}><span><Icon name="shield" />Two-factor login</span><strong>{twoFactorEnabled ? 'On' : 'Off'}</strong></button>
         <button className="toggle-row" type="button" onClick={() => onAction('Withdrawal confirmation is required for every request.')}><span><Icon name="check" />Withdrawal confirmation</span><strong>On</strong></button>
       </section>
@@ -772,7 +850,7 @@ function VerificationView({ user, verification, onBack, onVerify }) {
       <section className="info-panel verification-panel">
         <p className="eyebrow">Verification status</p>
         <h2>{user.verified ? 'Verified' : 'Unverified'}</h2>
-        <div className={`verification-status${user.verified ? ' verified' : ''}`}><Icon name={user.verified ? 'check' : 'upload'} /><span>{user.verified ? 'Your wallet is enabled for recharge, withdrawals, and VIP purchases.' : 'Upload one ID or passport document and one face picture to unlock wallet actions.'}</span></div>
+        <div className={`verification-status${user.verified ? ' verified' : ''}`}><Icon name={user.verified ? 'check' : 'upload'} /><span>{user.verified ? 'Your wallet is enabled for recharge, withdrawals, and Maining purchases.' : 'Upload one ID or passport document and one face picture to unlock wallet actions.'}</span></div>
         <div className="result-strip"><Metric label="Document" value={verification?.documentName || 'Required'} /><Metric label="Face Photo" value={verification?.faceName || 'Required'} /></div>
       </section>
     </div>
@@ -802,6 +880,13 @@ function getTierProjection(amount, monthlyRate = projectedMonthlyRate) {
   const monthlyProfit = plan ? dailyIncome * 30 : numericAmount * monthlyRate
   const weeklyIncome = dailyIncome * 7
   return { dailyIncome, weeklyIncome, monthlyProfit, monthResult: numericAmount + monthlyProfit }
+}
+
+function getNextVipPayoutRefreshDate(now = new Date()) {
+  const nextRefresh = new Date(now)
+  nextRefresh.setHours(vipDailyPayoutHour, 0, 2, 0)
+  if (nextRefresh <= now) nextRefresh.setDate(nextRefresh.getDate() + 1)
+  return nextRefresh
 }
 
 function findTierPlanByAmount(amount) {
@@ -836,8 +921,8 @@ function formatPercent(rate) {
 function toClientPurchase(purchase) {
   const tier = tiers.find((item) => item.id === purchase.tierId)
   const cryptoTone = cryptoOptions.find((option) => option.id === purchase.crypto)?.tone || 'blue'
-  if (tier) return { ...tier, ...purchase, id: tier.id, price: purchase.amount, tone: cryptoTone }
-  return { ...purchase, id: purchase.tierId, price: purchase.amount || 0, monthlyRate: projectedMonthlyRate, color: '#4b91ff', tone: cryptoTone }
+  if (tier) return { ...tier, ...purchase, id: tier.id, level: tier.level, title: tier.title, price: purchase.amount, tone: cryptoTone }
+  return { ...purchase, id: purchase.tierId, level: normalizeMainingText(purchase.level), title: normalizeMainingText(purchase.title), price: purchase.amount || 0, monthlyRate: projectedMonthlyRate, color: '#4b91ff', tone: cryptoTone }
 }
 
 function toClientWallet(wallet) {
@@ -850,7 +935,7 @@ function toClientTransaction(transaction) {
 
 function toActivity(transaction) {
   const isCredit = ['recharge', 'earning', 'referral_deposit', 'referral_task'].includes(transaction.type)
-  const title = transaction.memo || (transaction.type === 'earning' ? 'VIP daily income' : transaction.type === 'referral_deposit' ? 'Referral deposit commission' : transaction.type === 'referral_task' ? 'Referral task commission' : isCredit ? 'Wallet recharge' : transaction.type === 'purchase' ? 'Tier purchase' : 'Wallet withdrawal')
+  const title = normalizeMainingText(transaction.memo || (transaction.type === 'earning' ? 'Maining daily income' : transaction.type === 'referral_deposit' ? 'Referral deposit commission' : transaction.type === 'referral_task' ? 'Referral task commission' : isCredit ? 'Wallet recharge' : transaction.type === 'purchase' ? 'Plan purchase' : 'Wallet withdrawal'))
   const details = [transaction.status, transaction.crypto, transaction.network].filter(Boolean).join(' - ')
   return {
     title,
@@ -859,6 +944,11 @@ function toActivity(transaction) {
     type: 'wallet',
     tone: transaction.tone,
   }
+}
+
+function normalizeMainingText(value) {
+  if (!value) return value
+  return String(value || '').replaceAll('Sez VIP', 'Maining Plan').replaceAll('VIP', 'Maining').replaceAll('Tier purchase', 'Plan purchase')
 }
 
 function getTransactionTone(type) {
@@ -1033,10 +1123,10 @@ function handleStaticApi(path, options = {}) {
     requireStaticVerifiedAccount(account)
     const tier = tiers.find((item) => item.id === body.tierId)
     const crypto = String(body.crypto || '').toUpperCase()
-    if (!tier) throw new Error('Choose a valid investment tier.')
+    if (!tier) throw new Error('Choose a valid Maining plan.')
     if (!cryptoOptions.some((option) => option.id === crypto)) throw new Error('Choose a supported cryptocurrency.')
-    if ((account.purchases || []).some((purchase) => purchase.tierId === tier.id)) throw new Error('This tier is already in your profile.')
-    if (account.wallet.balance < tier.price) throw new Error('Recharge your wallet before buying this tier.')
+    if ((account.purchases || []).some((purchase) => purchase.tierId === tier.id)) throw new Error('This plan is already in your profile.')
+    if (account.wallet.balance < tier.price) throw new Error('Recharge your wallet before buying this plan.')
 
     const purchase = { tierId: tier.id, level: tier.level, title: tier.title, amount: tier.price, crypto, createdAt: new Date().toISOString() }
     account.purchases = [purchase, ...(account.purchases || [])]
@@ -1241,7 +1331,7 @@ function normalizeStaticAccount(account, index, inviteCodes, walletIds) {
 }
 
 function normalizeStaticPurchase(purchase) {
-  return { ...purchase, createdAt: purchase.createdAt || new Date().toISOString() }
+  return { ...purchase, level: normalizeMainingText(purchase.level), title: normalizeMainingText(purchase.title), createdAt: purchase.createdAt || new Date().toISOString() }
 }
 
 function normalizeStaticEmail(value) {
@@ -1348,36 +1438,60 @@ function syncStaticVipEarnings(state, account) {
 }
 
 function getStaticMissingDailyEarningDates(purchaseCreatedAt, lastEarningDate) {
-  const today = startOfStaticUtcDay(new Date())
-  const lastDate = lastEarningDate ? parseStaticUtcDate(lastEarningDate) : null
-  const purchaseDate = parseStaticUtcDate(purchaseCreatedAt)
-  let currentDate = addStaticUtcDays(startOfStaticUtcDay(lastDate || purchaseDate), 1)
+  const latestPayoutDate = getLatestStaticVipPayoutDate()
+  const lastDate = lastEarningDate ? parseStaticLocalDate(lastEarningDate) : null
+  const purchaseDate = parseStaticLocalDate(purchaseCreatedAt)
+  let currentDate = lastDate ? addStaticLocalDays(startOfStaticLocalDay(lastDate), 1) : getFirstStaticVipPayoutDate(purchaseDate)
   const dates = []
 
-  while (currentDate <= today) {
-    dates.push(currentDate.toISOString().slice(0, 10))
-    currentDate = addStaticUtcDays(currentDate, 1)
+  while (currentDate <= latestPayoutDate) {
+    dates.push(toStaticLocalDateKey(currentDate))
+    currentDate = addStaticLocalDays(currentDate, 1)
   }
 
   return dates
 }
 
-function parseStaticUtcDate(value) {
+function getFirstStaticVipPayoutDate(purchaseDate) {
+  const payoutDate = startOfStaticLocalDay(purchaseDate)
+  const payoutMoment = new Date(payoutDate)
+  payoutMoment.setHours(vipDailyPayoutHour, 0, 0, 0)
+  return purchaseDate >= payoutMoment ? addStaticLocalDays(payoutDate, 1) : payoutDate
+}
+
+function getLatestStaticVipPayoutDate(now = new Date()) {
+  const payoutDate = startOfStaticLocalDay(now)
+  const payoutMoment = new Date(payoutDate)
+  payoutMoment.setHours(vipDailyPayoutHour, 0, 0, 0)
+  return now >= payoutMoment ? payoutDate : addStaticLocalDays(payoutDate, -1)
+}
+
+function parseStaticLocalDate(value) {
   if (!value) return new Date()
-  if (/^\d{4}-\d{2}-\d{2}$/.test(String(value))) return new Date(`${value}T00:00:00.000Z`)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(value))) {
+    const [year, month, day] = String(value).split('-').map(Number)
+    return new Date(year, month - 1, day)
+  }
 
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? new Date() : date
 }
 
-function startOfStaticUtcDay(date) {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
+function startOfStaticLocalDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
 }
 
-function addStaticUtcDays(date, days) {
+function addStaticLocalDays(date, days) {
   const nextDate = new Date(date)
-  nextDate.setUTCDate(nextDate.getUTCDate() + days)
+  nextDate.setDate(nextDate.getDate() + days)
   return nextDate
+}
+
+function toStaticLocalDateKey(date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 function roundStaticMoney(amount) {
@@ -1427,6 +1541,10 @@ function Icon({ name }) {
     chevron: <path d="m9 5 7 7-7 7" />,
   }
   return <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>
+}
+
+function TelegramSupportButton() {
+  return <a className="message-fab" href={telegramSupportUrl} target="_blank" rel="noreferrer" aria-label="Open Telegram bot support"><Icon name="send" /><span>Bot Support</span></a>
 }
 
 export default App

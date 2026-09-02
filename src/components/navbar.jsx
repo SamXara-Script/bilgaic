@@ -2,7 +2,7 @@ export function BottomNav({ items, activeId, onSelect }) {
   return <nav className="bottom-nav" aria-label="Main navigation">{items.map((item) => <button key={item.id} type="button" className={activeId === item.id ? 'active' : ''} aria-current={activeId === item.id ? 'page' : undefined} onClick={() => onSelect(item.id)}><NavIcon name={item.icon} /><span>{item.label}</span></button>)}</nav>
 }
 
-export function SideNav({ items, activeId, onSelect, onLogout }) {
+export function SideNav({ items, activeId, onSelect, onLogout, supportUrl }) {
   return (
     <aside className="side-nav">
       <div className="side-brand"><span>SEZ</span><i /></div>
@@ -11,7 +11,7 @@ export function SideNav({ items, activeId, onSelect, onLogout }) {
         {items.map((item) => <button key={item.id} type="button" className={activeId === item.id ? 'active' : ''} onClick={() => onSelect(item.id)}><NavIcon name={item.icon} /><span>{item.label}</span></button>)}
       </nav>
       <button className="side-logout" type="button" onClick={onLogout}><NavIcon name="logout" /><span>Sign out</span></button>
-      <div className="side-help"><span>Need help?</span><strong>Contact support</strong></div>
+      <a className="side-help" href={supportUrl} target="_blank" rel="noreferrer"><span>Need help?</span><strong>Telegram bot support</strong></a>
     </aside>
   )
 }

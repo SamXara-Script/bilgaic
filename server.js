@@ -14,6 +14,7 @@ const bootstrapInviteCodes = new Set(String(configuredInviteCodes || defaultInvi
 const hasConfiguredInviteCodes = Boolean(configuredInviteCodes)
 const projectedMonthlyRate = 0.24
 const withdrawalFeeRate = 0.16
+const vipDailyPayoutHour = 16
 const referralTeams = [
   { level: 1, label: 'Team 1', taskRate: 0.06, depositRate: 0.03 },
   { level: 2, label: 'Team 2', taskRate: 0.03, depositRate: 0.02 },
@@ -39,7 +40,7 @@ const tierPlans = [
 const tierIds = ['starter', 'premium', 'elite', 'royal']
 const tierCatalog = Object.fromEntries(tierPlans.map(({ amount, dailyIncome }, index) => {
   const id = tierIds[index] || `vip-${index + 1}`
-  return [id, { id, level: `VIP ${index + 1}`, title: `Sez VIP ${index + 1}`, amount, dailyIncome }]
+  return [id, { id, level: `Maining ${index + 1}`, title: `Maining Plan ${index + 1}`, amount, dailyIncome }]
 }))
 
 const allowedCryptos = new Set(['USDT', 'BTC', 'ETH'])
@@ -150,6 +151,7 @@ db.exec(`
 const queries = {
   deleteExpiredSessions: db.prepare('DELETE FROM sessions WHERE expires_at <= ?'),
   countUsers: db.prepare('SELECT COUNT(*) AS count FROM users'),
+  listUserIds: db.prepare('SELECT id FROM users ORDER BY id'),
   findUserByEmail: db.prepare(`
     SELECT id, name, email, verified, invite_code AS inviteCode, wallet_id AS walletId, wallet_balance AS walletBalance, password_salt AS passwordSalt, password_hash AS passwordHash
     FROM users
@@ -373,19 +375,19 @@ async function handleApi(request, response, url) {
     requireVerifiedUser(user)
     const tier = tierCatalog[body.tierId]
     const crypto = String(body.crypto || '').toUpperCase()
-    if (!tier) throw httpError(400, 'Choose a valid investment tier.')
+    if (!tier) throw httpError(400, 'Choose a valid Maining plan.')
     if (!allowedCryptos.has(crypto)) throw httpError(400, 'Choose a supported cryptocurrency.')
 
     try {
       runInTransaction(() => {
         const walletOwner = queries.findUserById.get(user.id)
-        if (!walletOwner || Number(walletOwner.walletBalance) < tier.amount) throw httpError(400, 'Recharge your wallet before buying this tier.')
+        if (!walletOwner || Number(walletOwner.walletBalance) < tier.amount) throw httpError(400, 'Recharge your wallet before buying this plan.')
         queries.createPurchase.run(user.id, tier.id, tier.level, tier.title, tier.amount, crypto)
         queries.updateWalletBalance.run(-tier.amount, user.id)
         queries.createWalletTransaction.run(user.id, 'purchase', tier.amount, crypto, null, null, `${tier.level} ${tier.title}`, 'Completed')
       })
     } catch (error) {
-      if (String(error.message).includes('UNIQUE constraint failed')) throw httpError(409, 'This tier is already in your profile.')
+      if (String(error.message).includes('UNIQUE constraint failed')) throw httpError(409, 'This plan is already in your profile.')
       throw error
     }
 
@@ -580,16 +582,35 @@ function syncVipEarnings(userId) {
   return queries.findUserById.get(userId)
 }
 
+function syncAllVipEarnings() {
+  for (const user of queries.listUserIds.all()) {
+    try {
+      syncVipEarnings(user.id)
+    } catch (error) {
+      console.error(`Unable to sync Maining earnings for user ${user.id}:`, error.message)
+    }
+  }
+}
+
+function scheduleVipPayoutSync() {
+  const nextRun = getNextVipPayoutRunDate()
+  const delay = Math.max(nextRun.getTime() - Date.now(), 1000)
+  setTimeout(() => {
+    syncAllVipEarnings()
+    scheduleVipPayoutSync()
+  }, Math.min(delay, 2147483647))
+}
+
 function getMissingDailyEarningDates(purchaseCreatedAt, lastEarningDate) {
-  const today = startOfUtcDay(new Date())
-  const lastDate = lastEarningDate ? parseUtcDate(lastEarningDate) : null
-  const purchaseDate = parseUtcDate(purchaseCreatedAt)
-  let currentDate = addUtcDays(startOfUtcDay(lastDate || purchaseDate), 1)
+  const latestPayoutDate = getLatestVipPayoutDate()
+  const lastDate = lastEarningDate ? parseLocalDate(lastEarningDate) : null
+  const purchaseDate = parseLocalDate(purchaseCreatedAt)
+  let currentDate = lastDate ? addLocalDays(startOfLocalDay(lastDate), 1) : getFirstVipPayoutDate(purchaseDate)
   const dates = []
 
-  while (currentDate <= today) {
-    dates.push(toUtcDateKey(currentDate))
-    currentDate = addUtcDays(currentDate, 1)
+  while (currentDate <= latestPayoutDate) {
+    dates.push(toLocalDateKey(currentDate))
+    currentDate = addLocalDays(currentDate, 1)
   }
 
   return dates
@@ -673,27 +694,54 @@ function formatServerMoney(amount) {
   return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-function parseUtcDate(value) {
+function getFirstVipPayoutDate(purchaseDate) {
+  const payoutDate = startOfLocalDay(purchaseDate)
+  const payoutMoment = new Date(payoutDate)
+  payoutMoment.setHours(vipDailyPayoutHour, 0, 0, 0)
+  return purchaseDate >= payoutMoment ? addLocalDays(payoutDate, 1) : payoutDate
+}
+
+function getLatestVipPayoutDate(now = new Date()) {
+  const payoutDate = startOfLocalDay(now)
+  const payoutMoment = new Date(payoutDate)
+  payoutMoment.setHours(vipDailyPayoutHour, 0, 0, 0)
+  return now >= payoutMoment ? payoutDate : addLocalDays(payoutDate, -1)
+}
+
+function getNextVipPayoutRunDate(now = new Date()) {
+  const nextRun = new Date(now)
+  nextRun.setHours(vipDailyPayoutHour, 0, 2, 0)
+  if (nextRun <= now) nextRun.setDate(nextRun.getDate() + 1)
+  return nextRun
+}
+
+function parseLocalDate(value) {
   if (!value) return new Date()
-  if (/^\d{4}-\d{2}-\d{2}$/.test(String(value))) return new Date(`${value}T00:00:00.000Z`)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(value))) {
+    const [year, month, day] = String(value).split('-').map(Number)
+    return new Date(year, month - 1, day)
+  }
 
   const normalized = String(value).includes('T') ? String(value) : String(value).replace(' ', 'T')
   const date = new Date(normalized.endsWith('Z') ? normalized : `${normalized}Z`)
   return Number.isNaN(date.getTime()) ? new Date() : date
 }
 
-function startOfUtcDay(date) {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
+function startOfLocalDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
 }
 
-function addUtcDays(date, days) {
+function addLocalDays(date, days) {
   const nextDate = new Date(date)
-  nextDate.setUTCDate(nextDate.getUTCDate() + days)
+  nextDate.setDate(nextDate.getDate() + days)
   return nextDate
 }
 
-function toUtcDateKey(date) {
-  return date.toISOString().slice(0, 10)
+function toLocalDateKey(date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 async function readBody(request) {
@@ -882,4 +930,6 @@ function httpError(statusCode, message) {
 
 server.listen(port, '127.0.0.1', () => {
   console.log(`SEZ API and production server running at http://127.0.0.1:${port}`)
+  syncAllVipEarnings()
+  scheduleVipPayoutSync()
 })

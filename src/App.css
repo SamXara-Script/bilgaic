@@ -74,3 +74,101 @@ h1 { font-size: 20px; line-height: 1.15; }
   .investment-summary { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, .8fr); align-items: center; min-height: 212px; padding: 31px 34px; border-radius: 22px; }.summary-metrics { margin: 0; }.investment-summary h1 { font-size: 26px; }.active-tier { min-width: 98px; padding: 12px 15px; border-radius: 12px; }.filter-row { margin: 24px 0 18px; }.tier-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }.tier-card { min-height: 310px; padding: 24px; border-radius: 18px; }.tier-card h2 { font-size: 21px; }.tier-price strong { font-size: 26px; }.tier-stats .metric { padding: 16px 10px; }.tier-stats .metric strong { font-size: 16px; }.primary-button { min-height: 46px; border-radius: 11px; }.message-fab { right: 38px; bottom: 34px; left: auto; }
   .wallet-hero, .profile-hero { padding: 34px; border-radius: 22px; }.wallet-hero { min-height: 255px; }.wallet-hero h1 { font-size: 48px; }.wallet-buttons { width: min(460px, 100%); }.wallet-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 24px 0 32px; }.profile-hero { min-height: 155px; }.profile-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 24px 0; }.wallet-stats .metric, .profile-grid .metric { padding: 18px; }.settings-list { max-width: 660px; }.purchased-panel { max-width: 800px; padding: 22px; border-radius: 16px; }.checkout-back, .subpage-back { margin-bottom: 22px; }.checkout-grid, .detail-grid { grid-template-columns: minmax(0, 1fr) minmax(390px, .85fr); gap: 24px; }.checkout-intro, .checkout-payment, .form-panel, .info-panel { min-height: 472px; padding: 32px; border-radius: 18px; }.checkout-intro h1 { font-size: 33px; }.checkout-product { margin-top: 34px; padding: 22px; }.checkout-payment > h2, .info-panel h2 { font-size: 23px; }.crypto-options { margin: 24px 0; }.crypto-options button { min-height: 58px; }.payment-total { margin: 24px 0; }.settings-form { min-height: auto; }
 }
+
+.message-fab {
+  right: max(14px, calc((100vw - 420px) / 2 + 14px));
+  left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  min-width: 0;
+  height: 48px;
+  gap: 8px;
+  padding: 0 14px;
+  border-radius: 999px;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.message-fab span {
+  color: #fff;
+  white-space: nowrap;
+}
+
+.auth-shell .message-fab {
+  bottom: 18px;
+}
+
+.maining-panel {
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);
+  border-radius: 22px;
+  background: radial-gradient(circle at 85% 10%, color-mix(in srgb, var(--accent) 28%, transparent), transparent 30%), linear-gradient(145deg, #142243, #12192c);
+  box-shadow: 0 16px 28px rgba(0, 0, 0, .15);
+}
+
+.maining-panel h1 {
+  font-size: 30px;
+}
+
+.maining-panel > p:not(.eyebrow) {
+  color: #a7b2c9;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.maining-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.maining-copy {
+  padding: 14px;
+  border: 1px solid rgba(158, 179, 237, .14);
+  border-radius: 12px;
+  background: #0c1323;
+}
+
+.maining-copy h3 {
+  font-size: 15px;
+}
+
+.maining-copy p {
+  margin-top: 7px;
+  color: #8f9bb4;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.side-help {
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.side-help:focus-visible {
+  outline: 2px solid #a983ff;
+  outline-offset: 3px;
+}
+
+@media (min-width: 880px) {
+  .message-fab {
+    right: 38px;
+    bottom: 34px;
+  }
+
+  .maining-panel {
+    min-height: 472px;
+    padding: 32px;
+    border-radius: 18px;
+  }
+
+  .maining-panel h1 {
+    font-size: 34px;
+  }
+}
