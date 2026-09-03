@@ -517,13 +517,8 @@ function requireInviteCode(value) {
   const userCount = Number(queries.countUsers.get().count) || 0
   const bootstrapAllowed = bootstrapInviteCodes.has(inviteCode) && (hasConfiguredInviteCodes || userCount === 0)
   if (bootstrapAllowed) return { inviteCode, inviterId: null }
-  if (isMemberInviteCode(inviteCode)) return { inviteCode, inviterId: null }
 
   throw httpError(403, 'Invite code is invalid.')
-}
-
-function isMemberInviteCode(value) {
-  return /^SEZ[0-9A-Z]{6}$/.test(value)
 }
 
 function requireAmount(value) {
@@ -642,12 +637,13 @@ function listReferralTeam(userId) {
   for (const team of referralTeams) {
     const nextTeamUserIds = []
     for (const teamUserId of currentTeamUserIds) {
+      const parent = queries.findUserById.get(teamUserId)
       for (const referral of queries.listDirectReferrals.all(teamUserId)) {
         if (seen.has(referral.id)) continue
 
         seen.add(referral.id)
         nextTeamUserIds.push(referral.id)
-        referrals.push(toPublicReferral({ ...referral, ...team }))
+        referrals.push(toPublicReferral({ ...referral, ...team, parentId: teamUserId, parentName: parent?.name || 'You' }))
       }
     }
     currentTeamUserIds = nextTeamUserIds
@@ -807,6 +803,8 @@ function toPublicReferral(record) {
     name: record.name,
     email: record.email,
     createdAt: record.createdAt,
+    parentId: Number(record.parentId) || null,
+    parentName: record.parentName || '',
     level: Number(record.level) || 1,
     team: record.label || `Team ${Number(record.level) || 1}`,
     taskRate: Number(record.taskRate) || 0,

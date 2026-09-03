@@ -626,7 +626,7 @@ function WalletView({ onRecharge, onWithdraw, portfolio, transactions }) {
         <div className="wallet-identity"><span>Wallet ID</span><strong>{portfolio.walletId || 'Not assigned'}</strong></div>
         <div className="wallet-buttons"><PrimaryButton label="Recharge" icon="plus" onClick={onRecharge} /><PrimaryButton label="Withdraw" icon="arrow-up" secondary onClick={onWithdraw} /></div>
       </section>
-      <section className="wallet-stats"><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label={`${profitWindowDays} Day Profit`} value={formatMoney(portfolio.periodProfit)} green /><Metric label="1 Month Profit" value={formatMoney(portfolio.earnings)} /><Metric label="Active Plans" value={String(portfolio.activeTiers)} /></section>
+      <section className="wallet-stats"><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label="Total Income" value={formatMoney(portfolio.totalIncome)} green /><Metric label="1 Month Profit" value={formatMoney(portfolio.earnings)} /><Metric label="Active Plans" value={String(portfolio.activeTiers)} /></section>
       <SectionHeader title="Wallet History" />
       <div className="wallet-history-tabs" role="tablist" aria-label="Wallet history">
         {walletHistoryFilters.map((filter) => <SegmentButton key={filter.id} label={filter.label} active={historyFilter === filter.id} onClick={() => setHistoryFilter(filter.id)} />)}
@@ -689,16 +689,59 @@ function ReferralView({ user, referrals, onCopy, onRefresh }) {
         {teamCounts.map((team) => <article className="commission-row" key={team.level}><strong>{team.label}</strong><span>{team.count} members</span><small>Task {formatPercent(team.taskRate)} / Deposit {formatPercent(team.depositRate)}</small></article>)}
       </section>
       <section className="purchased-panel referral-panel">
-        <SectionHeader title="Referral Team" action={refreshing ? 'Refreshing...' : 'Refresh'} onAction={refresh} />
-        <ReferralList referrals={referrals} />
+        <SectionHeader title="Referral Tree" action={refreshing ? 'Refreshing...' : 'Refresh'} onAction={refresh} />
+        <ReferralList referrals={referrals} rootUser={user} />
       </section>
     </>
   )
 }
 
-function ReferralList({ referrals }) {
+function ReferralList({ referrals, rootUser }) {
   if (!referrals.length) return <div className="empty-state purchased-empty"><Icon name="send" /><p>No team members yet</p></div>
-  return <div className="referral-list">{referrals.map((referral) => <article className="referral-row" key={referral.id}><div><span className="team-tag">{referral.team || `Team ${referral.level || 1}`}</span><h3>{referral.name}</h3><p>{referral.email}</p></div><div className="referral-meta"><strong>{formatShortDate(referral.createdAt)}</strong><small>Task {formatPercent(referral.taskRate)} / Deposit {formatPercent(referral.depositRate)}</small></div></article>)}</div>
+  const tree = buildReferralTree(referrals, rootUser)
+
+  return <div className="referral-tree">{tree.map((node) => <ReferralTreeNode key={node.id} node={node} depth={0} />)}</div>
+}
+
+function ReferralTreeNode({ node, depth }) {
+  return <div className="referral-branch" style={{ '--depth': depth }}>
+    <article className="referral-row tree-row">
+      <div>
+        <span className="team-tag">{node.team || `Team ${node.level || 1}`}</span>
+        <h3>{node.name}</h3>
+        <p>{node.email}</p>
+        <small>Registered by {node.parentName || 'You'}</small>
+      </div>
+      <div className="referral-meta">
+        <strong>{formatShortDate(node.createdAt)}</strong>
+        <small>Task {formatPercent(node.taskRate)} / Deposit {formatPercent(node.depositRate)}</small>
+      </div>
+    </article>
+    {Boolean(node.children.length) && <div className="referral-children">{node.children.map((child) => <ReferralTreeNode key={child.id} node={child} depth={depth + 1} />)}</div>}
+  </div>
+}
+
+function buildReferralTree(referrals, rootUser) {
+  const nodes = new Map(referrals.map((referral) => [Number(referral.id), { ...referral, children: [] }]))
+  const roots = []
+
+  for (const node of nodes.values()) {
+    const parentId = Number(node.parentId)
+    const parent = nodes.get(parentId)
+    if (parent) {
+      parent.children.push(node)
+    } else {
+      roots.push({ ...node, parentName: node.parentName || rootUser?.name || 'You' })
+    }
+  }
+
+  const sortTree = (items) => {
+    items.sort((first, second) => Number(first.level || 1) - Number(second.level || 1) || String(first.name).localeCompare(String(second.name)))
+    for (const item of items) sortTree(item.children)
+    return items
+  }
+
+  return sortTree(roots)
 }
 
 function SupportView({ onTutorial }) {
@@ -1450,6 +1493,7 @@ function getStaticReferrals(state, userId) {
   for (const team of referralTeams) {
     const nextTeamUserIds = []
     for (const teamUserId of currentTeamUserIds) {
+      const parent = state.users.find((account) => account.id === teamUserId)
       for (const account of getStaticDirectReferrals(state, teamUserId)) {
         if (seen.has(account.id)) continue
 
@@ -1460,6 +1504,8 @@ function getStaticReferrals(state, userId) {
           name: account.name,
           email: account.email,
           createdAt: account.createdAt,
+          parentId: teamUserId,
+          parentName: parent?.name || 'You',
           level: team.level,
           team: team.label,
           taskRate: team.taskRate,
@@ -1574,12 +1620,7 @@ function requireStaticInviteCode(value, state) {
   const inviter = state.users.find((account) => account.inviteCode === inviteCode)
   if (inviter) return { inviteCode, inviterId: inviter.id }
   if (inviteCode === defaultInviteCode && state.users.length === 0) return { inviteCode, inviterId: null }
-  if (isStaticMemberInviteCode(inviteCode)) return { inviteCode, inviterId: null }
   throw new Error('Invite code is invalid.')
-}
-
-function isStaticMemberInviteCode(value) {
-  return /^SEZ[0-9A-Z]{6}$/.test(value)
 }
 
 function createStaticInviteCode(seed, existingCodes) {

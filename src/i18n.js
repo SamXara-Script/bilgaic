@@ -97,6 +97,7 @@ const russianTranslations = {
   'Invite Status': 'Статус приглашения',
   'Referral commission rates': 'Ставки реферальной комиссии',
   'Referral Team': 'Реферальная команда',
+  'Referral Tree': 'Реферальное дерево',
   Refresh: 'Обновить',
   'Refreshing...': 'Обновление...',
   'No team members yet': 'Участников команды пока нет',
@@ -430,4 +431,5 @@ const patternTranslations = [
   { pattern: /^Withdrawal submitted\. You receive (.+) after (.+) fee\.$/, translate: ([, receive, fee]) => `Вывод отправлен. Вы получите ${receive} после комиссии ${fee}.` },
   { pattern: /^Invite code: (.+)$/, translate: ([, code]) => `Код приглашения: ${code}` },
   { pattern: /^(.+) from wallet (.+)$/, translate: ([, amount, wallet]) => `${amount} из кошелька ${wallet}` },
+  { pattern: /^Registered by (.+)$/, translate: ([, name]) => `Зарегистрирован через ${name}` },
 ]
