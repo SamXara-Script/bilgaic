@@ -26,6 +26,7 @@ const referralTeams = [
 ]
 const maxJsonBodySize = 8 * 1024 * 1024
 const maxUploadBytes = 3 * 1024 * 1024
+const supportChangeMessage = 'Contact support to change customer name or Gmail.'
 const baseSecurityHeaders = {
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
@@ -187,7 +188,6 @@ const queries = {
     INSERT INTO users (name, email, password_salt, password_hash, verified, invite_code, registration_invite_code, referred_by_user_id, wallet_id, wallet_balance)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
-  updateUserProfile: db.prepare('UPDATE users SET name = ?, email = ? WHERE id = ?'),
   updatePassword: db.prepare('UPDATE users SET password_salt = ?, password_hash = ? WHERE id = ?'),
   updateWalletBalance: db.prepare('UPDATE users SET wallet_balance = wallet_balance + ? WHERE id = ?'),
   updateVerificationStatus: db.prepare('UPDATE users SET verified = ? WHERE id = ?'),
@@ -235,6 +235,12 @@ const queries = {
     WHERE user_id = ?
     ORDER BY id DESC
     LIMIT 40
+  `),
+  sumIncomeTransactions: db.prepare(`
+    SELECT COALESCE(SUM(amount), 0) AS totalIncome
+    FROM wallet_transactions
+    WHERE user_id = ?
+      AND type IN ('earning', 'referral_deposit', 'referral_task')
   `),
   createWalletTransaction: db.prepare(`
     INSERT INTO wallet_transactions (user_id, type, amount, crypto, network, address, memo, status)
@@ -327,17 +333,7 @@ async function handleApi(request, response, url) {
   }
 
   if (request.method === 'PATCH' && url.pathname === '/api/profile') {
-    const body = await readBody(request)
-    const name = requireText(body.name, 'Name', 2, 80)
-    const email = normalizeEmail(body.email)
-    const existingUser = queries.findUserByEmail.get(email)
-
-    if (existingUser && existingUser.id !== user.id) throw httpError(409, 'An account already uses this email address.')
-
-    queries.updateUserProfile.run(name, email, user.id)
-    const record = queries.findUserById.get(user.id)
-    sendJson(response, 200, { user: toPublicUser(record) })
-    return
+    throw httpError(403, supportChangeMessage)
   }
 
   if (request.method === 'POST' && url.pathname === '/api/security/password') {
@@ -406,6 +402,7 @@ async function handleApi(request, response, url) {
         purchase: { tierId: tier.id, level: tier.level, title: tier.title, amount: tier.amount, crypto, createdAt },
         wallet: toPublicWallet(record),
         transactions: queries.listWalletTransactions.all(user.id).map(toPublicWalletTransaction),
+        totalIncome: getTotalIncome(user.id),
       })
       return
     } catch (error) {
@@ -435,6 +432,7 @@ async function handleApi(request, response, url) {
       recharge: { amount, crypto, network, status: 'Credited' },
       wallet: toPublicWallet(record),
       transactions: queries.listWalletTransactions.all(user.id).map(toPublicWalletTransaction),
+      totalIncome: getTotalIncome(user.id),
     })
     return
   }
@@ -462,6 +460,7 @@ async function handleApi(request, response, url) {
       withdrawal: { amount, fee, receiveAmount, crypto, address, status: 'Pending' },
       wallet: toPublicWallet(record),
       transactions: queries.listWalletTransactions.all(user.id).map(toPublicWalletTransaction),
+      totalIncome: getTotalIncome(user.id),
     })
     return
   }
@@ -846,9 +845,14 @@ function sendAccountPayload(response, status, record, extraHeaders = {}) {
     wallet: toPublicWallet(syncedRecord),
     purchases: queries.listPurchases.all(syncedRecord.id),
     transactions: queries.listWalletTransactions.all(syncedRecord.id).map(toPublicWalletTransaction),
+    totalIncome: getTotalIncome(syncedRecord.id),
     referrals: listReferralTeam(syncedRecord.id),
     verification: toPublicVerification(queries.findLatestVerification.get(syncedRecord.id)),
   }, extraHeaders)
+}
+
+function getTotalIncome(userId) {
+  return Number(queries.sumIncomeTransactions.get(userId)?.totalIncome) || 0
 }
 
 function walletAddress(record, crypto, network) {

@@ -11,7 +11,7 @@ export function SideNav({ items, activeId, onSelect, onLogout, supportUrl }) {
         {items.map((item) => <button key={item.id} type="button" className={activeId === item.id ? 'active' : ''} onClick={() => onSelect(item.id)}><NavIcon name={item.icon} /><span>{item.label}</span></button>)}
       </nav>
       <button className="side-logout" type="button" onClick={onLogout}><NavIcon name="logout" /><span>Sign out</span></button>
-      <a className="side-help" href={supportUrl} target="_blank" rel="noreferrer"><span>Need help?</span><strong>Telegram bot support</strong></a>
+      <a className="side-help" href={supportUrl} target="_blank" rel="noreferrer"><span>Need help?</span><strong>Telegram support</strong></a>
     </aside>
   )
 }

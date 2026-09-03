@@ -27,6 +27,7 @@ const pageMeta = {
   profileSettings: { eyebrow: 'Account management', title: 'Profile settings' },
   verification: { eyebrow: 'Customer verification', title: 'Verify account' },
   language: { eyebrow: 'Display settings', title: 'Language' },
+  supportTutorial: { eyebrow: 'Customer help', title: 'Tutorial' },
 }
 
 const actionItems = [
@@ -46,6 +47,7 @@ const withdrawalFeeRate = 0.16
 const profitWindowDays = 17
 const payoutCycleMs = 24 * 60 * 60 * 1000
 const telegramSupportUrl = 'https://t.me/+J82Rio5xns1lY2Ni'
+const telegramGroupUrl = telegramSupportUrl
 const referralTeams = [
   { level: 1, label: 'Team 1', taskRate: 0.06, depositRate: 0.03 },
   { level: 2, label: 'Team 2', taskRate: 0.03, depositRate: 0.02 },
@@ -109,6 +111,63 @@ const verificationRequiredMessage = 'Upload your ID or passport and face photo t
 const uploadMaxBytes = 3 * 1024 * 1024
 const documentUploadTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
 const faceUploadTypes = ['image/jpeg', 'image/png', 'image/webp']
+const supportChangeMessage = 'Contact support to change customer name or Gmail.'
+const walletHistoryFilters = [
+  { id: 'recharge', label: 'Recharge History', emptyMessage: 'No recharge history yet' },
+  { id: 'withdrawal', label: 'Withdraw History', emptyMessage: 'No withdraw history yet' },
+]
+const incomeTransactionTypes = ['earning', 'referral_deposit', 'referral_task']
+const supportTutorials = [
+  {
+    id: 'account',
+    label: 'Account',
+    title: 'Account Tutorial',
+    icon: 'user',
+    intro: 'Use your member invite code to register, then keep login and password details secure.',
+    steps: [
+      'Register with your full name, Gmail address, password, and member invite code.',
+      'After login, open Profile to check account status, language, referrals, and security.',
+      'Customer name and Gmail are locked. Contact support when those details need to change.',
+    ],
+  },
+  {
+    id: 'wallet',
+    label: 'Wallet',
+    title: 'Wallet Tutorial',
+    icon: 'wallet',
+    intro: 'The wallet page controls balance, recharge, withdraw, and filtered transaction history.',
+    steps: [
+      'Verify the account before using wallet actions.',
+      'Open Recharge, choose currency and network, then use the generated wallet address.',
+      'Open Withdraw, enter amount and destination wallet, then review fee and receive amount before submitting.',
+    ],
+  },
+  {
+    id: 'verification',
+    label: 'Verification',
+    title: 'Verification Tutorial',
+    icon: 'upload',
+    intro: 'Verification unlocks recharge, withdrawal, and Maining plan purchase actions.',
+    steps: [
+      'Choose ID card or passport as the document type.',
+      'Upload one document file and one clear face photo.',
+      'Submit verification and wait for the profile status to show Verified.',
+    ],
+  },
+  {
+    id: 'maining',
+    label: 'Maining Plans',
+    title: 'Maining Plans Tutorial',
+    icon: 'grid',
+    intro: 'Maining plans use wallet balance to purchase a selected mining package.',
+    steps: [
+      'Open Invest and filter plans by price range.',
+      'Read plan details to review price, daily payout, projected profit, and payout timer.',
+      'Buy the plan from wallet balance and track active plans from Profile.',
+    ],
+  },
+]
+const supportTutorialMap = Object.fromEntries(supportTutorials.map((tutorial) => [tutorial.id, tutorial]))
 
 function App() {
   const [activeView, setActiveView] = useState('home')
@@ -121,12 +180,14 @@ function App() {
   const [purchases, setPurchases] = useState([])
   const [wallet, setWallet] = useState(emptyWallet)
   const [transactions, setTransactions] = useState([])
+  const [totalIncome, setTotalIncome] = useState(0)
   const [referrals, setReferrals] = useState([])
   const [verification, setVerification] = useState(null)
   const [user, setUser] = useState(null)
   const [authMode, setAuthMode] = useState('login')
   const [authReady, setAuthReady] = useState(false)
   const [language, setLanguage] = useState(readSavedLanguage)
+  const [supportTopic, setSupportTopic] = useState('account')
   const [clockNow, setClockNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -138,10 +199,12 @@ function App() {
   }, [])
 
   const applyAccountPayload = useCallback((payload) => {
+    const normalizedTransactions = (payload.transactions || []).map(toClientTransaction)
     setUser(payload.user)
     setWallet(toClientWallet(payload.wallet))
     setPurchases((payload.purchases || []).map(toClientPurchase))
-    setTransactions((payload.transactions || []).map(toClientTransaction))
+    setTransactions(normalizedTransactions)
+    setTotalIncome(readPayloadTotalIncome(payload, normalizedTransactions))
     setReferrals(payload.referrals || [])
     setVerification(payload.verification || null)
   }, [])
@@ -238,9 +301,10 @@ function App() {
       earnings: projected.monthlyProfit,
       dailyIncome: projected.dailyIncome,
       periodProfit: projected.periodProfit,
+      totalIncome,
       oneMonthResult: totalInvested + projected.monthlyProfit,
     }
-  }, [purchases, wallet.balance, wallet.id])
+  }, [purchases, totalIncome, wallet.balance, wallet.id])
 
   const selectedLanguage = useMemo(() => getLanguageOption(language), [language])
   const payoutTimer = useMemo(() => getPortfolioPayoutTimer(purchases, clockNow), [purchases, clockNow])
@@ -296,6 +360,13 @@ function App() {
     setActiveView(view)
   }
 
+  function openSupportTutorial(topicId) {
+    setCheckoutTier(null)
+    setMainingTier(null)
+    setSupportTopic(supportTutorialMap[topicId] ? topicId : 'account')
+    setActiveView('supportTutorial')
+  }
+
   function updateLanguage(nextLanguage) {
     const option = getLanguageOption(nextLanguage)
     setLanguage(option.id)
@@ -306,9 +377,11 @@ function App() {
     if (!checkoutTier || purchases.some((purchase) => purchase.id === checkoutTier.id)) return
     try {
       const result = await requestApi('/api/purchases', { method: 'POST', body: { tierId: checkoutTier.id, crypto: selectedCrypto } })
+      const normalizedTransactions = (result.transactions || []).map(toClientTransaction)
       setPurchases((current) => [toClientPurchase(result.purchase), ...current])
       setWallet(toClientWallet(result.wallet))
-      setTransactions((result.transactions || []).map(toClientTransaction))
+      setTransactions(normalizedTransactions)
+      setTotalIncome(readPayloadTotalIncome(result, normalizedTransactions))
       setCheckoutTier(null)
       setMainingTier(null)
       setActiveView('profile')
@@ -316,12 +389,6 @@ function App() {
     } catch (error) {
       showNotice(error.message)
     }
-  }
-
-  async function updateProfile({ name, email }) {
-    const result = await requestApi('/api/profile', { method: 'PATCH', body: { name, email } })
-    setUser(result.user)
-    showNotice('Profile settings saved.')
   }
 
   async function updatePassword({ currentPassword, newPassword }) {
@@ -340,8 +407,10 @@ function App() {
   async function submitWithdrawal({ amount, crypto, address }) {
     if (!requireVerifiedAccount()) throw new Error(verificationRequiredMessage)
     const result = await requestApi('/api/withdrawals', { method: 'POST', body: { amount, crypto, address } })
+    const normalizedTransactions = (result.transactions || []).map(toClientTransaction)
     setWallet(toClientWallet(result.wallet))
-    setTransactions((result.transactions || []).map(toClientTransaction))
+    setTransactions(normalizedTransactions)
+    setTotalIncome(readPayloadTotalIncome(result, normalizedTransactions))
     const withdrawal = result.withdrawal || { amount, fee: calculateWithdrawalFee(amount), receiveAmount: calculateWithdrawalReceiveAmount(amount) }
     showNotice(`Withdrawal submitted. You receive ${formatMoney(withdrawal.receiveAmount)} after ${formatMoney(withdrawal.fee)} fee.`)
   }
@@ -365,12 +434,7 @@ function App() {
   async function authenticate({ mode, name, email, password, inviteCode }) {
     const payload = mode === 'register' ? { name: name.trim(), email, password, inviteCode } : { email, password }
     const result = await requestApi(`/api/auth/${mode}`, { method: 'POST', body: payload })
-    setUser(result.user)
-    setWallet(toClientWallet(result.wallet))
-    setPurchases(result.purchases.map(toClientPurchase))
-    setTransactions((result.transactions || []).map(toClientTransaction))
-    setReferrals(result.referrals || [])
-    setVerification(result.verification || null)
+    applyAccountPayload(result)
     setActiveView(result.user?.verified ? 'home' : 'verification')
     setCheckoutTier(null)
     setMainingTier(null)
@@ -387,6 +451,7 @@ function App() {
     setPurchases([])
     setWallet(emptyWallet)
     setTransactions([])
+    setTotalIncome(0)
     setReferrals([])
     setVerification(null)
     setCheckoutTier(null)
@@ -418,13 +483,14 @@ function App() {
             {activeView === 'home' && <HomeView onAction={showNotice} onNavigate={navigateTo} onVerify={() => navigateTo('verification')} onHistory={() => navigateTo('wallet')} portfolio={portfolio} payoutTimer={payoutTimer} activities={activities} user={user} onLogout={logout} />}
             {activeView === 'invest' && <InvestView filter={tierFilter} onFilter={setTierFilter} tiers={filteredTiers} portfolio={portfolio} payoutTimer={payoutTimer} purchases={purchases} now={clockNow} onReadMore={(tier) => showMainingDetails(tier, 'invest')} />}
             {activeView === 'mainingDetails' && mainingTier && <MainingDetailsView tier={mainingPurchase || mainingTier} owned={Boolean(mainingPurchase)} payoutTimer={getPurchasePayoutTimer(mainingPurchase, clockNow)} onBack={() => navigateTo(mainingBackView)} onBuy={startCheckout} />}
-            {activeView === 'wallet' && <WalletView onAction={showNotice} onRecharge={() => navigateTo('recharge')} onWithdraw={() => navigateTo('withdraw')} portfolio={portfolio} payoutTimer={payoutTimer} activities={activities} />}
+            {activeView === 'wallet' && <WalletView onRecharge={() => navigateTo('recharge')} onWithdraw={() => navigateTo('withdraw')} portfolio={portfolio} transactions={transactions} />}
             {activeView === 'referrals' && <ReferralView user={user} referrals={referrals} onCopy={copyInviteCode} onRefresh={refreshReferrals} />}
-            {activeView === 'support' && <SupportView onAction={showNotice} />}
+            {activeView === 'support' && <SupportView onTutorial={openSupportTutorial} />}
+            {activeView === 'supportTutorial' && <SupportTutorialView topicId={supportTopic} onBack={() => setActiveView('support')} />}
             {activeView === 'profile' && <ProfileView onAction={showNotice} onProfileSettings={() => navigateTo('profileSettings')} onLanguage={() => navigateTo('language')} onSecurity={() => navigateTo('security')} onReferrals={() => navigateTo('referrals')} onVerification={() => navigateTo('verification')} onReadMore={(tier) => showMainingDetails(tier, 'profile')} portfolio={portfolio} payoutTimer={payoutTimer} purchases={purchases} now={clockNow} user={user} verification={verification} language={selectedLanguage} onLogout={logout} />}
             {activeView === 'recharge' && <RechargeView wallet={wallet} onBack={() => setActiveView('wallet')} />}
             {activeView === 'withdraw' && <WithdrawView onBack={() => setActiveView('wallet')} onWithdraw={submitWithdrawal} portfolio={portfolio} />}
-            {activeView === 'profileSettings' && <ProfileSettingsView user={user} onBack={() => setActiveView('profile')} onSave={updateProfile} />}
+            {activeView === 'profileSettings' && <ProfileSettingsView user={user} onBack={() => setActiveView('profile')} />}
             {activeView === 'security' && <SecurityView user={user} onBack={() => setActiveView('profile')} onAction={showNotice} onPasswordChange={updatePassword} onVerification={() => navigateTo('verification')} />}
             {activeView === 'verification' && <VerificationView user={user} verification={verification} onBack={() => setActiveView('profile')} onVerify={submitVerification} />}
             {activeView === 'language' && <LanguageView language={language} onBack={() => setActiveView('profile')} onChange={updateLanguage} />}
@@ -548,7 +614,11 @@ function InvestView({ filter, onFilter, tiers: tierItems, portfolio, payoutTimer
   )
 }
 
-function WalletView({ onAction, onRecharge, onWithdraw, portfolio, activities }) {
+function WalletView({ onRecharge, onWithdraw, portfolio, transactions }) {
+  const [historyFilter, setHistoryFilter] = useState('recharge')
+  const selectedFilter = walletHistoryFilters.find((filter) => filter.id === historyFilter) || walletHistoryFilters[0]
+  const historyItems = transactions.filter((transaction) => transaction.type === selectedFilter.id).map(toActivity)
+
   return (
     <>
       <section className="wallet-hero">
@@ -557,8 +627,11 @@ function WalletView({ onAction, onRecharge, onWithdraw, portfolio, activities })
         <div className="wallet-buttons"><PrimaryButton label="Recharge" icon="plus" onClick={onRecharge} /><PrimaryButton label="Withdraw" icon="arrow-up" secondary onClick={onWithdraw} /></div>
       </section>
       <section className="wallet-stats"><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label={`${profitWindowDays} Day Profit`} value={formatMoney(portfolio.periodProfit)} green /><Metric label="1 Month Profit" value={formatMoney(portfolio.earnings)} /><Metric label="Active Plans" value={String(portfolio.activeTiers)} /></section>
-      <SectionHeader title="Recent Activity" action="History" onAction={() => onAction('Wallet history is up to date.')} />
-      <ActivityList items={activities} emptyMessage="No transactions yet" />
+      <SectionHeader title="Wallet History" />
+      <div className="wallet-history-tabs" role="tablist" aria-label="Wallet history">
+        {walletHistoryFilters.map((filter) => <SegmentButton key={filter.id} label={filter.label} active={historyFilter === filter.id} onClick={() => setHistoryFilter(filter.id)} />)}
+      </div>
+      <ActivityList items={historyItems} emptyMessage={selectedFilter.emptyMessage} />
     </>
   )
 }
@@ -570,7 +643,7 @@ function ProfileView({ onAction, onProfileSettings, onLanguage, onSecurity, onRe
   return (
     <>
       <section className="profile-hero"><div className="large-avatar">{user.name.slice(0, 1).toUpperCase()}</div><div><p className="eyebrow">Member Account</p><h1>{user.name}</h1><p>{user.email}</p><span className={`verification-pill${user.verified ? ' verified' : ''}`}>{verificationLabel}</span></div></section>
-      <section className="profile-grid"><Metric label="Wallet" value={formatMoney(portfolio.walletBalance)} /><Metric label="Active Plans" value={String(portfolio.activeTiers)} /><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label={`${profitWindowDays} Day Profit`} value={formatMoney(portfolio.periodProfit)} green /></section>
+      <section className="profile-grid"><Metric label="Wallet" value={formatMoney(portfolio.walletBalance)} /><Metric label="Active Plans" value={String(portfolio.activeTiers)} /><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label="Total Income" value={formatMoney(portfolio.totalIncome)} green /></section>
       {!user.verified && <VerificationBanner onVerify={onVerification} />}
       <section className="purchased-panel"><SectionHeader title="Purchased Plans" action={`${portfolio.activeTiers} active`} onAction={() => onAction('Your purchased plans are shown below.')} /><PurchasedTiers purchases={purchases} now={now} onReadMore={onReadMore} /></section>
       <section className="settings-list">
@@ -628,25 +701,56 @@ function ReferralList({ referrals }) {
   return <div className="referral-list">{referrals.map((referral) => <article className="referral-row" key={referral.id}><div><span className="team-tag">{referral.team || `Team ${referral.level || 1}`}</span><h3>{referral.name}</h3><p>{referral.email}</p></div><div className="referral-meta"><strong>{formatShortDate(referral.createdAt)}</strong><small>Task {formatPercent(referral.taskRate)} / Deposit {formatPercent(referral.depositRate)}</small></div></article>)}</div>
 }
 
-function SupportView({ onAction }) {
+function SupportView({ onTutorial }) {
   return (
     <>
       <section className="support-hero">
         <div>
           <p className="eyebrow">Support center</p>
           <h1>Customer Support</h1>
-          <p>Contact the support bot for account, wallet, verification, and Maining plan help.</p>
+          <p>Contact support for account, wallet, verification, and Maining plan help.</p>
         </div>
-        <a href={telegramSupportUrl} target="_blank" rel="noreferrer"><Icon name="send" />Open Bot</a>
+        <div className="support-actions">
+          <a href={telegramSupportUrl} target="_blank" rel="noreferrer"><Icon name="send" />Support</a>
+          <a href={telegramGroupUrl} target="_blank" rel="noreferrer"><Icon name="users" />Group Chat</a>
+        </div>
       </section>
-      <section className="support-grid">
-        <button type="button" onClick={() => onAction('Use the Telegram bot for account access help.')}><span><Icon name="user" />Account</span><Icon name="chevron" /></button>
-        <button type="button" onClick={() => onAction('Use the Telegram bot for recharge and withdrawal help.')}><span><Icon name="wallet" />Wallet</span><Icon name="chevron" /></button>
-        <button type="button" onClick={() => onAction('Use the Telegram bot for verification help.')}><span><Icon name="upload" />Verification</span><Icon name="chevron" /></button>
-        <button type="button" onClick={() => onAction('Use the Telegram bot for Maining plan help.')}><span><Icon name="grid" />Maining Plans</span><Icon name="chevron" /></button>
+      <section className="support-grid" aria-label="Support tutorials">
+        {supportTutorials.map((tutorial) => (
+          <button type="button" key={tutorial.id} onClick={() => onTutorial(tutorial.id)}>
+            <span><Icon name={tutorial.icon} />{tutorial.label}</span>
+            <small>Tutorial</small>
+            <Icon name="chevron" />
+          </button>
+        ))}
       </section>
     </>
   )
+}
+
+function SupportTutorialView({ topicId, onBack }) {
+  const tutorial = supportTutorialMap[topicId] || supportTutorials[0]
+
+  return <section className="detail-page support-tutorial-page">
+    <button className="subpage-back" type="button" onClick={onBack}><Icon name="arrow-left" />Back to support</button>
+    <div className="detail-grid support-tutorial-layout">
+      <section className="form-panel support-tutorial-panel">
+        <p className="eyebrow">Support tutorial</p>
+        <h1>{tutorial.title}</h1>
+        <p className="tutorial-intro">{tutorial.intro}</p>
+        <div className="tutorial-list">
+          {tutorial.steps.map((step, index) => <article className="tutorial-step" key={step}><strong>{index + 1}</strong><p>{step}</p></article>)}
+        </div>
+      </section>
+      <section className="info-panel support-contact-panel">
+        <p className="eyebrow">Customer help</p>
+        <h2>Need support?</h2>
+        <div className="verification-status verified"><Icon name="send" /><span>Contact support if you need account changes, wallet help, verification help, or Maining plan help.</span></div>
+        <a className="primary-button" href={telegramSupportUrl} target="_blank" rel="noreferrer"><Icon name="send" />Contact Support</a>
+        <a className="primary-button secondary" href={telegramGroupUrl} target="_blank" rel="noreferrer"><Icon name="users" />Group Chat</a>
+      </section>
+    </div>
+  </section>
 }
 
 function TierCard({ tier, owned, now, onReadMore }) {
@@ -706,7 +810,7 @@ function OverviewCard({ item }) {
 
 function ActivityList({ items, emptyMessage }) {
   if (!items.length) return <section className="empty-state"><Icon name="wallet" /><p>{emptyMessage}</p></section>
-  return <section className="activity-list">{items.map((item, index) => <article className="activity-row" key={`${item.title}-${item.time}-${index}`}><div className={`activity-icon ${item.tone}`}><Icon name={item.type} /></div><div className="activity-copy"><h3>{item.title}</h3><p>{item.time}</p></div><strong className={item.amount.startsWith('+') ? 'positive' : 'negative'}>{item.amount}</strong></article>)}</section>
+  return <section className="activity-list">{items.map((item, index) => <article className="activity-row" key={`${item.title}-${item.time}-${item.meta || ''}-${index}`}><div className={`activity-icon ${item.tone}`}><Icon name={item.type} /></div><div className="activity-copy"><h3>{item.title}</h3><p>{item.time}</p>{item.meta && <small>{item.meta}</small>}</div><strong className={item.amount.startsWith('+') ? 'positive' : 'negative'}>{item.amount}</strong></article>)}</section>
 }
 
 function PurchasedTiers({ purchases, now, onReadMore }) {
@@ -794,35 +898,17 @@ function WithdrawView({ onBack, onWithdraw, portfolio }) {
   </section>
 }
 
-function ProfileSettingsView({ user, onBack, onSave }) {
-  const [name, setName] = useState(user.name)
-  const [email, setEmail] = useState(user.email)
-  const [error, setError] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-
-  async function submit(event) {
-    event.preventDefault()
-    setError('')
-    setSubmitting(true)
-    try {
-      await onSave({ name, email })
-    } catch (saveError) {
-      setError(saveError.message)
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
+function ProfileSettingsView({ user, onBack }) {
   return <section className="detail-page">
     <button className="subpage-back" type="button" onClick={onBack}><Icon name="arrow-left" />Back to profile</button>
-    <form className="form-panel settings-form" onSubmit={submit}>
+    <section className="form-panel settings-form">
       <p className="eyebrow">Profile settings</p>
       <h1>Personal details</h1>
-      <label>Full name<input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" required /></label>
-      <label>Email address<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label>
-      {error && <p className="auth-error" role="alert">{error}</p>}
-      <button className="primary-button" type="submit" disabled={submitting}>{submitting ? 'Saving...' : 'Save Profile'}</button>
-    </form>
+      <label>Full name<input value={user.name} readOnly aria-readonly="true" /></label>
+      <div className="locked-profile-field"><span>Gmail address</span><strong>{user.email}</strong></div>
+      <div className="locked-profile-note"><Icon name="shield" /><span>{supportChangeMessage}</span></div>
+      <a className="primary-button" href={telegramSupportUrl} target="_blank" rel="noreferrer"><Icon name="send" />Contact Support</a>
+    </section>
   </section>
 }
 
@@ -938,7 +1024,7 @@ function VerificationView({ user, verification, onBack, onVerify }) {
 }
 
 function SectionHeader({ title, action, onAction }) {
-  return <div className="section-heading"><h2>{title}</h2><button type="button" onClick={onAction}>{action}</button></div>
+  return <div className="section-heading"><h2>{title}</h2>{action && <button type="button" onClick={onAction}>{action}</button>}</div>
 }
 
 function Metric({ label, value, green = false }) {
@@ -1052,7 +1138,19 @@ function toClientWallet(wallet) {
 }
 
 function toClientTransaction(transaction) {
-  return { ...transaction, amount: Number(transaction.amount) || 0, tone: getTransactionTone(transaction.type) }
+  return { ...transaction, amount: Number(transaction.amount) || 0, createdAt: transaction.createdAt || new Date().toISOString(), tone: getTransactionTone(transaction.type) }
+}
+
+function readPayloadTotalIncome(payload, fallbackTransactions) {
+  const total = Number(payload?.totalIncome)
+  if (Number.isFinite(total)) return roundClientMoney(total)
+  return calculateTotalIncome(fallbackTransactions)
+}
+
+function calculateTotalIncome(transactions) {
+  return roundClientMoney((transactions || []).reduce((total, transaction) => {
+    return incomeTransactionTypes.includes(transaction.type) ? total + (Number(transaction.amount) || 0) : total
+  }, 0))
 }
 
 function toActivity(transaction) {
@@ -1062,6 +1160,7 @@ function toActivity(transaction) {
   return {
     title,
     time: details || 'Wallet activity',
+    meta: formatShortDateTime(transaction.createdAt),
     amount: `${isCredit ? '+' : '-'}${formatMoney(transaction.amount)}`,
     type: 'wallet',
     tone: transaction.tone,
@@ -1086,6 +1185,13 @@ function formatShortDate(value) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return 'New'
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function formatShortDateTime(value) {
+  if (!value) return 'New'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'New'
+  return date.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 function fileToUpload(file, label, allowedTypes) {
@@ -1202,16 +1308,7 @@ function handleStaticApi(path, options = {}) {
   }
 
   if (method === 'PATCH' && path === '/api/profile') {
-    const name = requireStaticText(body.name, 'Name', 2, 80)
-    const email = normalizeStaticEmail(body.email)
-    const existingAccount = state.users.find((item) => item.email === email)
-    if (existingAccount && existingAccount.id !== account.id) throw new Error('An account already uses this email address.')
-
-    account.name = name
-    account.email = email
-    state.sessionEmail = email
-    writeStaticAuthState(state)
-    return { user: toPublicUser(account) }
+    throw new Error(supportChangeMessage)
   }
 
   if (method === 'POST' && path === '/api/security/password') {
@@ -1255,7 +1352,7 @@ function handleStaticApi(path, options = {}) {
     account.wallet.balance -= tier.price
     account.transactions = [createStaticTransaction('purchase', tier.price, crypto, null, null, `${tier.level} ${tier.title}`, 'Completed'), ...(account.transactions || [])]
     writeStaticAuthState(state)
-    return { purchase, wallet: toPublicWallet(account), transactions: account.transactions }
+    return { purchase, wallet: toPublicWallet(account), transactions: account.transactions, totalIncome: calculateTotalIncome(account.transactions) }
   }
 
   if (method === 'POST' && path === '/api/recharges') {
@@ -1271,7 +1368,7 @@ function handleStaticApi(path, options = {}) {
     account.transactions = [createStaticTransaction('recharge', amount, crypto, network, `SEZ-${account.wallet.id}-${crypto}-${network}`, 'Wallet recharge', 'Credited'), ...(account.transactions || [])]
     creditStaticReferralCommissions(state, account.id, amount, crypto, 'deposit')
     writeStaticAuthState(state)
-    return { recharge: { amount, crypto, network, status: 'Credited' }, wallet: toPublicWallet(account), transactions: account.transactions }
+    return { recharge: { amount, crypto, network, status: 'Credited' }, wallet: toPublicWallet(account), transactions: account.transactions, totalIncome: calculateTotalIncome(account.transactions) }
   }
 
   if (method === 'POST' && path === '/api/withdrawals') {
@@ -1288,7 +1385,7 @@ function handleStaticApi(path, options = {}) {
     account.wallet.balance -= amount
     account.transactions = [createStaticTransaction('withdrawal', amount, crypto, null, address, `Wallet withdrawal - 16% fee, ${formatMoney(receiveAmount)} sent`, 'Pending'), ...(account.transactions || [])]
     writeStaticAuthState(state)
-    return { withdrawal: { amount, fee, receiveAmount, crypto, address, status: 'Pending' }, wallet: toPublicWallet(account), transactions: account.transactions }
+    return { withdrawal: { amount, fee, receiveAmount, crypto, address, status: 'Pending' }, wallet: toPublicWallet(account), transactions: account.transactions, totalIncome: calculateTotalIncome(account.transactions) }
   }
 
   throw new Error('API route not found.')
@@ -1339,6 +1436,7 @@ function toStaticAccountPayload(account, state) {
     wallet: toPublicWallet(account),
     purchases: account.purchases || [],
     transactions: account.transactions || [],
+    totalIncome: calculateTotalIncome(account.transactions || []),
     referrals: getStaticReferrals(state, account.id),
     verification: account.verification || null,
   }
@@ -1445,7 +1543,7 @@ function normalizeStaticAccount(account, index, inviteCodes, walletIds) {
     verification: account.verification || null,
     wallet: { id: walletId, balance: Number(storedWallet.balance ?? account.walletBalance) || 0 },
     purchases: Array.isArray(account.purchases) ? account.purchases.map(normalizeStaticPurchase) : [],
-    transactions: Array.isArray(account.transactions) ? account.transactions : [],
+    transactions: Array.isArray(account.transactions) ? account.transactions.map(normalizeStaticTransaction) : [],
     dailyEarnings: Array.isArray(account.dailyEarnings) ? account.dailyEarnings : [],
     referredByUserId: Number(account.referredByUserId) || null,
     createdAt: account.createdAt || new Date().toISOString(),
@@ -1454,6 +1552,10 @@ function normalizeStaticAccount(account, index, inviteCodes, walletIds) {
 
 function normalizeStaticPurchase(purchase) {
   return { ...purchase, level: normalizeMainingText(purchase.level), title: normalizeMainingText(purchase.title), createdAt: purchase.createdAt || new Date().toISOString() }
+}
+
+function normalizeStaticTransaction(transaction) {
+  return { ...transaction, createdAt: transaction.createdAt || new Date().toISOString() }
 }
 
 function normalizeStaticEmail(value) {
@@ -1647,6 +1749,7 @@ function Icon({ name }) {
     grid: <><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></>,
     wallet: <><path d="M4 7a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v2H7a3 3 0 0 0 0 6h12v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" /><path d="M19 9h-5a3 3 0 0 0 0 6h5z" /></>,
     user: <><circle cx="12" cy="8" r="3.5" /><path d="M5 20c.6-3.5 3.1-5.5 7-5.5s6.4 2 7 5.5" /></>,
+    users: <><path d="M16 11.5a3 3 0 1 0-2.2-5" /><path d="M19.5 20c-.4-2.5-2-4-4.5-4" /><circle cx="9" cy="8.5" r="3.5" /><path d="M2.5 20c.6-3.5 2.9-5.5 6.5-5.5s5.9 2 6.5 5.5" /></>,
     trend: <><path d="m4 16 6-6 4 4 6-7" /><path d="M15 7h5v5" /></>,
     check: <><circle cx="12" cy="12" r="8" /><path d="m8.5 12 2.2 2.2 4.8-5" /></>,
     send: <><path d="m21 3-7.5 18-3.3-7.2L3 10.5z" /><path d="m10.2 13.8 4.3-4.3" /></>,
@@ -1661,7 +1764,7 @@ function Icon({ name }) {
 }
 
 function TelegramSupportButton() {
-  return <a className="message-fab" href={telegramSupportUrl} target="_blank" rel="noreferrer" aria-label="Open Telegram bot support"><Icon name="send" /><span>Bot Support</span></a>
+  return <a className="message-fab" href={telegramSupportUrl} target="_blank" rel="noreferrer" aria-label="Open support"><Icon name="send" /><span>Support</span></a>
 }
 
 export default App
