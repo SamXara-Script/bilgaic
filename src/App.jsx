@@ -41,6 +41,11 @@ const cryptoOptions = [
   { id: 'BTC', name: 'Bitcoin', quantity: (price) => `${(price / 64000).toFixed(6)} BTC`, tone: 'gold' },
   { id: 'ETH', name: 'Ethereum', quantity: (price) => `${(price / 3400).toFixed(4)} ETH`, tone: 'violet' },
 ]
+const rechargeAddresses = {
+  USDT: {
+    TRC20: 'TC8a7KAFSuBo9bfHuHRApFs678jGtMjznv',
+  },
+}
 
 const projectedMonthlyRate = 0.24
 const withdrawalFeeRate = 0.16
@@ -879,7 +884,7 @@ function CheckoutView({ tier, crypto, wallet, onCrypto, onBack, onConfirm }) {
 function RechargeView({ wallet, onBack }) {
   const [crypto, setCrypto] = useState('USDT')
   const [network, setNetwork] = useState('TRC20')
-  const walletAddress = `SEZ-${wallet.id || 'WALLET'}-${crypto}-${network}`
+  const walletAddress = getRechargeAddress(wallet, crypto, network)
 
   return <section className="detail-page recharge-page">
     <button className="subpage-back" type="button" onClick={onBack}><Icon name="arrow-left" />Back to wallet</button>
@@ -1180,6 +1185,10 @@ function toClientWallet(wallet) {
   return { id: wallet?.id || '', balance: Number(wallet?.balance) || 0 }
 }
 
+function getRechargeAddress(wallet, crypto, network) {
+  return rechargeAddresses[crypto]?.[network] || `SEZ-${wallet?.id || 'WALLET'}-${crypto}-${network}`
+}
+
 function toClientTransaction(transaction) {
   return { ...transaction, amount: Number(transaction.amount) || 0, createdAt: transaction.createdAt || new Date().toISOString(), tone: getTransactionTone(transaction.type) }
 }
@@ -1408,7 +1417,7 @@ function handleStaticApi(path, options = {}) {
     if (!['TRC20', 'ERC20', 'BEP20'].includes(network)) throw new Error('Choose a supported network.')
 
     account.wallet.balance = roundStaticMoney((Number(account.wallet.balance) || 0) + amount)
-    account.transactions = [createStaticTransaction('recharge', amount, crypto, network, `SEZ-${account.wallet.id}-${crypto}-${network}`, 'Wallet recharge', 'Credited'), ...(account.transactions || [])]
+    account.transactions = [createStaticTransaction('recharge', amount, crypto, network, getRechargeAddress(account.wallet, crypto, network), 'Wallet recharge', 'Credited'), ...(account.transactions || [])]
     creditStaticReferralCommissions(state, account.id, amount, crypto, 'deposit')
     writeStaticAuthState(state)
     return { recharge: { amount, crypto, network, status: 'Credited' }, wallet: toPublicWallet(account), transactions: account.transactions, totalIncome: calculateTotalIncome(account.transactions) }

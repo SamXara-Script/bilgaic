@@ -59,6 +59,11 @@ const tierCatalog = Object.fromEntries(tierPlans.map(({ amount, dailyIncome }, i
 
 const allowedCryptos = new Set(['USDT', 'BTC', 'ETH'])
 const allowedNetworks = new Set(['TRC20', 'ERC20', 'BEP20'])
+const rechargeAddresses = {
+  USDT: {
+    TRC20: 'TC8a7KAFSuBo9bfHuHRApFs678jGtMjznv',
+  },
+}
 const allowedDocumentTypes = new Set(['id', 'passport'])
 const allowedDocumentMimes = new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/webp'])
 const allowedFaceMimes = new Set(['image/jpeg', 'image/png', 'image/webp'])
@@ -854,7 +859,7 @@ function getTotalIncome(userId) {
 }
 
 function walletAddress(record, crypto, network) {
-  return `SEZ-${record.walletId}-${crypto}-${network}`
+  return rechargeAddresses[crypto]?.[network] || `SEZ-${record.walletId}-${crypto}-${network}`
 }
 
 function runInTransaction(callback) {
