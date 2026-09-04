@@ -109,7 +109,6 @@ const tierFilters = [
 
 const staticAuthStorageKey = 'sez-demo-auth-reset-2026-09-03'
 const legacyStaticAuthStorageKeys = ['sez-demo-auth']
-const adminAccessKeyStorageKey = 'sez-admin-access-key'
 const languageStorageKey = 'sez-language'
 const defaultInviteCode = 'SEZ2026'
 const emptyWallet = { id: '', balance: 0 }
@@ -554,28 +553,21 @@ function AuthScreen({ mode, onModeChange, onAuthenticate }) {
 }
 
 function AdminApp() {
-  const [snapshot, setSnapshot] = useState(readInitialAdminSnapshot)
-  const [accessKey, setAccessKey] = useState(readSavedAdminAccessKey)
+  const [snapshot, setSnapshot] = useState(() => createEmptyAdminSnapshot('Server API', 'server'))
+  const [accessKey, setAccessKey] = useState('')
+  const [adminSessionKey, setAdminSessionKey] = useState('')
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const summary = snapshot.summary
   const users = snapshot.users || []
   const transactions = snapshot.transactions || []
 
-  function loadBrowserSnapshot() {
-    try {
-      setSnapshot(readStaticAdminSnapshot())
-      setError('')
-    } catch (loadError) {
-      setError(loadError.message)
-    }
-  }
-
-  async function loadServerSnapshot(event) {
+  async function submitAdminLogin(event) {
     event.preventDefault()
     const key = accessKey.trim()
     if (!key) {
-      setError('Enter the server admin access key.')
+      setError('Enter the admin access key.')
       return
     }
 
@@ -583,7 +575,9 @@ function AdminApp() {
     setError('')
     try {
       const nextSnapshot = await requestAdminSnapshot(key)
-      saveAdminAccessKey(key)
+      setAdminSessionKey(key)
+      setAccessKey('')
+      setIsAuthenticated(true)
       setSnapshot(nextSnapshot)
     } catch (loadError) {
       setError(loadError.message)
@@ -592,24 +586,63 @@ function AdminApp() {
     }
   }
 
+  async function refreshServerSnapshot() {
+    if (!adminSessionKey) {
+      setIsAuthenticated(false)
+      setError('Log in again to refresh admin data.')
+      return
+    }
+
+    setLoading(true)
+    setError('')
+    try {
+      setSnapshot(await requestAdminSnapshot(adminSessionKey))
+    } catch (loadError) {
+      setError(loadError.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function signOutAdmin() {
+    setAdminSessionKey('')
+    setAccessKey('')
+    setIsAuthenticated(false)
+    setError('')
+    setSnapshot(createEmptyAdminSnapshot('Server API', 'server'))
+  }
+
+  if (!isAuthenticated) {
+    return <main className="admin-shell admin-login-shell">
+      <header className="admin-topbar">
+        <a className="admin-brand" href={getCustomerAppUrl()}>SEZ<span />Admin</a>
+        <div className="admin-actions"><a href={getCustomerAppUrl()}>Customer app</a></div>
+      </header>
+
+      <section className="admin-login-card">
+        <p className="eyebrow">Restricted access</p>
+        <h1>Admin Login</h1>
+        <p>Enter the admin access key to open the dashboard.</p>
+        <form className="admin-login-form" onSubmit={submitAdminLogin}>
+          <label>Admin access key<input type="password" value={accessKey} onChange={(event) => setAccessKey(event.target.value)} autoComplete="off" autoFocus /></label>
+          <button type="submit" disabled={loading}><Icon name="shield" />{loading ? 'Checking...' : 'Log in'}</button>
+        </form>
+        {error && <div className="admin-alert" role="alert"><Icon name="shield" /><span>{error}</span></div>}
+        <p className="admin-login-note">Customer accounts cannot open the admin dashboard.</p>
+      </section>
+    </main>
+  }
+
   return <main className="admin-shell">
     <header className="admin-topbar">
       <a className="admin-brand" href={getCustomerAppUrl()}>SEZ<span />Admin</a>
-      <div className="admin-actions"><button type="button" onClick={loadBrowserSnapshot}><Icon name="refresh" />Refresh</button><a href={getCustomerAppUrl()}>Customer app</a></div>
+      <div className="admin-actions"><button type="button" onClick={refreshServerSnapshot} disabled={loading}><Icon name="refresh" />{loading ? 'Loading' : 'Refresh'}</button><button type="button" onClick={signOutAdmin}><Icon name="logout" />Sign out</button><a href={getCustomerAppUrl()}>Customer app</a></div>
     </header>
 
     <section className="admin-hero">
       <div><p className="eyebrow">Operations</p><h1>Admin Dashboard</h1><p>{snapshot.sourceLabel} updated {formatShortDateTime(snapshot.generatedAt)}</p></div>
-      <div className="admin-source-tabs" role="tablist" aria-label="Admin data source">
-        <button className={snapshot.sourceType === 'browser' ? 'active' : ''} type="button" onClick={loadBrowserSnapshot}><Icon name="grid" />Browser data</button>
-        <button className={snapshot.sourceType === 'server' ? 'active' : ''} type="submit" form="admin-server-form"><Icon name="shield" />Server API</button>
-      </div>
+      <div className="admin-source-badge"><Icon name="shield" />Admin session</div>
     </section>
-
-    <form className="admin-key-form" id="admin-server-form" onSubmit={loadServerSnapshot}>
-      <label>Server access key<input type="password" value={accessKey} onChange={(event) => setAccessKey(event.target.value)} autoComplete="off" /></label>
-      <button type="submit" disabled={loading}>{loading ? 'Loading...' : 'Load server'}</button>
-    </form>
 
     {error && <div className="admin-alert" role="alert"><Icon name="shield" /><span>{error}</span></div>}
 
@@ -1266,77 +1299,17 @@ function getCustomerAppUrl() {
   return `${window.location.origin}${basePath}`
 }
 
-function readInitialAdminSnapshot() {
-  try {
-    return readStaticAdminSnapshot()
-  } catch {
-    return createEmptyAdminSnapshot('Browser data', 'browser')
-  }
-}
-
-function readSavedAdminAccessKey() {
-  try {
-    return window.sessionStorage.getItem(adminAccessKeyStorageKey) || ''
-  } catch {
-    return ''
-  }
-}
-
-function saveAdminAccessKey(accessKey) {
-  try {
-    window.sessionStorage.setItem(adminAccessKeyStorageKey, accessKey)
-  } catch {
-    // The key still applies for the current form state.
-  }
-}
-
 async function requestAdminSnapshot(accessKey) {
   const response = await fetch('/api/admin/summary', {
     headers: { 'X-Admin-Key': accessKey },
     credentials: 'include',
   })
-  const payload = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(payload.error || 'Unable to load server admin data.')
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) {
+    if (!payload?.error && response.status === 404) throw new Error('Admin login requires the backend server with ADMIN_ACCESS_KEY configured.')
+    throw new Error(payload?.error || 'Unable to load server admin data.')
+  }
   return normalizeAdminSnapshot(payload, 'Server API', 'server')
-}
-
-function readStaticAdminSnapshot() {
-  const state = readStaticAuthState()
-  const users = state.users.map((account) => {
-    const transactions = Array.isArray(account.transactions) ? account.transactions : []
-    const purchases = Array.isArray(account.purchases) ? account.purchases : []
-    const totalRecharged = sumAdminTransactions(transactions, 'recharge')
-    const totalWithdrawn = sumAdminTransactions(transactions, 'withdrawal')
-    return {
-      id: account.id,
-      name: account.name,
-      email: account.email,
-      verified: Boolean(account.verified),
-      inviteCode: account.inviteCode,
-      walletId: account.wallet?.id || '',
-      walletBalance: Number(account.wallet?.balance) || 0,
-      purchasesCount: purchases.length,
-      referralCount: getStaticDirectReferrals(state, account.id).length,
-      transactionsCount: transactions.length,
-      pendingWithdrawals: transactions.filter((transaction) => transaction.type === 'withdrawal' && transaction.status === 'Pending').length,
-      totalIncome: calculateTotalIncome(transactions),
-      totalRecharged,
-      totalWithdrawn,
-      createdAt: account.createdAt,
-      lastActivity: getLatestAdminDate([...transactions, ...purchases]),
-    }
-  })
-  const transactions = state.users.flatMap((account) => {
-    return (Array.isArray(account.transactions) ? account.transactions : []).map((transaction, index) => ({
-      ...transaction,
-      id: `${account.id}-${index}-${transaction.createdAt || index}`,
-      userId: account.id,
-      userName: account.name,
-      userEmail: account.email,
-    }))
-  }).sort(compareAdminDateDesc).slice(0, 80)
-
-  return normalizeAdminSnapshot({ users, transactions }, 'Browser data', 'browser')
 }
 
 function normalizeAdminSnapshot(snapshot, sourceLabel, sourceType) {
@@ -1386,19 +1359,6 @@ function normalizeAdminSnapshot(snapshot, sourceLabel, sourceType) {
 
 function createEmptyAdminSnapshot(sourceLabel, sourceType) {
   return normalizeAdminSnapshot({ users: [], transactions: [] }, sourceLabel, sourceType)
-}
-
-function sumAdminTransactions(transactions, type) {
-  return roundClientMoney((transactions || []).reduce((total, transaction) => transaction.type === type ? total + (Number(transaction.amount) || 0) : total, 0))
-}
-
-function getLatestAdminDate(items) {
-  const timestamps = (items || []).map((item) => parseClientDate(item.createdAt)?.getTime() || 0).filter(Boolean)
-  return timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : null
-}
-
-function compareAdminDateDesc(left, right) {
-  return (parseClientDate(right.createdAt)?.getTime() || 0) - (parseClientDate(left.createdAt)?.getTime() || 0)
 }
 
 function formatAdminType(type) {

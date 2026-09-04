@@ -920,7 +920,7 @@ function readCookies(request) {
 
 function enforceRateLimit(request, url) {
   const now = Date.now()
-  const routeType = url.pathname.startsWith('/api/auth/') ? 'auth' : request.method === 'GET' ? 'read' : 'write'
+  const routeType = url.pathname.startsWith('/api/auth/') || url.pathname.startsWith('/api/admin/') ? 'auth' : request.method === 'GET' ? 'read' : 'write'
   const maxRequests = routeType === 'auth' ? 30 : routeType === 'write' ? 120 : 600
   const key = `${routeType}:${getClientIp(request)}`
   const bucket = rateLimitBuckets.get(key)
