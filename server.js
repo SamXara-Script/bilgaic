@@ -19,6 +19,7 @@ const payoutSyncIntervalMs = 60 * 1000
 const rateLimitWindowMs = 15 * 60 * 1000
 const rateLimitBuckets = new Map()
 const secureCookieAttribute = process.env.NODE_ENV === 'production' || process.env.COOKIE_SECURE === '1' ? '; Secure' : ''
+const adminAccessKey = process.env.ADMIN_ACCESS_KEY || ''
 const referralTeams = [
   { level: 1, label: 'Team 1', taskRate: 0.06, depositRate: 0.03 },
   { level: 2, label: 'Team 2', taskRate: 0.03, depositRate: 0.02 },
@@ -241,6 +242,73 @@ const queries = {
     ORDER BY id DESC
     LIMIT 40
   `),
+  listAdminUsers: db.prepare(`
+    SELECT
+      u.id,
+      u.name,
+      u.email,
+      u.verified,
+      u.invite_code AS inviteCode,
+      u.wallet_id AS walletId,
+      u.wallet_balance AS walletBalance,
+      u.created_at AS createdAt,
+      (SELECT COUNT(*) FROM purchases AS p WHERE p.user_id = u.id) AS purchasesCount,
+      (
+        SELECT COUNT(*)
+        FROM users AS child
+        WHERE child.id <> u.id
+          AND (child.referred_by_user_id = u.id OR child.registration_invite_code = u.invite_code)
+      ) AS referralCount,
+      (SELECT COUNT(*) FROM wallet_transactions AS wt WHERE wt.user_id = u.id) AS transactionsCount,
+      (
+        SELECT COALESCE(SUM(amount), 0)
+        FROM wallet_transactions AS wt
+        WHERE wt.user_id = u.id
+          AND wt.type IN ('earning', 'referral_deposit', 'referral_task')
+      ) AS totalIncome,
+      (
+        SELECT COALESCE(SUM(amount), 0)
+        FROM wallet_transactions AS wt
+        WHERE wt.user_id = u.id
+          AND wt.type = 'recharge'
+      ) AS totalRecharged,
+      (
+        SELECT COALESCE(SUM(amount), 0)
+        FROM wallet_transactions AS wt
+        WHERE wt.user_id = u.id
+          AND wt.type = 'withdrawal'
+      ) AS totalWithdrawn,
+      (
+        SELECT COUNT(*)
+        FROM wallet_transactions AS wt
+        WHERE wt.user_id = u.id
+          AND wt.type = 'withdrawal'
+          AND wt.status = 'Pending'
+      ) AS pendingWithdrawals,
+      (SELECT MAX(created_at) FROM purchases AS p WHERE p.user_id = u.id) AS lastPurchaseAt,
+      (SELECT MAX(created_at) FROM wallet_transactions AS wt WHERE wt.user_id = u.id) AS lastTransactionAt
+    FROM users AS u
+    ORDER BY u.id DESC
+  `),
+  listAdminTransactions: db.prepare(`
+    SELECT
+      wt.id,
+      wt.user_id AS userId,
+      users.name AS userName,
+      users.email AS userEmail,
+      wt.type,
+      wt.amount,
+      wt.crypto,
+      wt.network,
+      wt.address,
+      wt.memo,
+      wt.status,
+      wt.created_at AS createdAt
+    FROM wallet_transactions AS wt
+    JOIN users ON users.id = wt.user_id
+    ORDER BY wt.id DESC
+    LIMIT 80
+  `),
   sumIncomeTransactions: db.prepare(`
     SELECT COALESCE(SUM(amount), 0) AS totalIncome
     FROM wallet_transactions
@@ -322,6 +390,13 @@ async function handleApi(request, response, url) {
     const token = readCookies(request).sez_session
     if (token) queries.deleteSession.run(token)
     sendJson(response, 200, { ok: true }, { 'Set-Cookie': clearSessionCookie() })
+    return
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/admin/summary') {
+    requireAdminRequest(request)
+    syncAllVipEarnings()
+    sendJson(response, 200, getAdminSnapshot())
     return
   }
 
@@ -500,6 +575,84 @@ function hashPassword(password) {
 function verifyPassword(password, salt, storedHash) {
   const calculatedHash = scryptSync(password, salt, 64)
   return timingSafeEqual(calculatedHash, Buffer.from(storedHash, 'hex'))
+}
+
+function requireAdminRequest(request) {
+  if (!adminAccessKey) throw httpError(503, 'Admin API is disabled until ADMIN_ACCESS_KEY is configured.')
+  const accessKey = String(request.headers['x-admin-key'] || '')
+  if (!secureTextEquals(accessKey, adminAccessKey)) throw httpError(401, 'Admin access key is invalid.')
+}
+
+function secureTextEquals(value, expected) {
+  const valueBuffer = Buffer.from(String(value))
+  const expectedBuffer = Buffer.from(String(expected))
+  return valueBuffer.length === expectedBuffer.length && timingSafeEqual(valueBuffer, expectedBuffer)
+}
+
+function getAdminSnapshot() {
+  const users = queries.listAdminUsers.all().map(toAdminUser)
+  const transactions = queries.listAdminTransactions.all().map(toAdminTransaction)
+  const summary = {
+    totalUsers: users.length,
+    verifiedUsers: users.filter((user) => user.verified).length,
+    walletBalance: roundMoney(users.reduce((total, user) => total + user.walletBalance, 0)),
+    activePlans: users.reduce((total, user) => total + user.purchasesCount, 0),
+    totalRecharged: roundMoney(users.reduce((total, user) => total + user.totalRecharged, 0)),
+    totalWithdrawn: roundMoney(users.reduce((total, user) => total + user.totalWithdrawn, 0)),
+    pendingWithdrawals: users.reduce((total, user) => total + user.pendingWithdrawals, 0),
+  }
+
+  return {
+    sourceLabel: 'Server API',
+    sourceType: 'server',
+    generatedAt: new Date().toISOString(),
+    summary,
+    users,
+    transactions,
+  }
+}
+
+function toAdminUser(record) {
+  return {
+    id: record.id,
+    name: record.name,
+    email: record.email,
+    verified: Boolean(record.verified),
+    inviteCode: record.inviteCode,
+    walletId: record.walletId,
+    walletBalance: Number(record.walletBalance) || 0,
+    purchasesCount: Number(record.purchasesCount) || 0,
+    referralCount: Number(record.referralCount) || 0,
+    transactionsCount: Number(record.transactionsCount) || 0,
+    pendingWithdrawals: Number(record.pendingWithdrawals) || 0,
+    totalIncome: Number(record.totalIncome) || 0,
+    totalRecharged: Number(record.totalRecharged) || 0,
+    totalWithdrawn: Number(record.totalWithdrawn) || 0,
+    createdAt: record.createdAt,
+    lastActivity: latestDateValue(record.lastTransactionAt, record.lastPurchaseAt, record.createdAt),
+  }
+}
+
+function toAdminTransaction(record) {
+  return {
+    id: record.id,
+    userId: record.userId,
+    userName: record.userName,
+    userEmail: record.userEmail,
+    type: record.type,
+    amount: Number(record.amount) || 0,
+    crypto: record.crypto,
+    network: record.network,
+    address: record.address,
+    memo: record.memo,
+    status: record.status,
+    createdAt: record.createdAt,
+  }
+}
+
+function latestDateValue(...values) {
+  const timestamps = values.filter(Boolean).map((value) => new Date(value).getTime()).filter((value) => Number.isFinite(value))
+  return timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : null
 }
 
 function normalizeEmail(value) {
@@ -942,7 +1095,13 @@ function sendJson(response, status, payload, extraHeaders = {}) {
 function serveFrontend(response, pathname, headOnly) {
   const requestedPath = pathname === '/' ? '/index.html' : pathname
   const candidate = resolve(distDir, `.${requestedPath}`)
-  const filePath = candidate.startsWith(distDir) && existsSync(candidate) && statSync(candidate).isFile() ? candidate : join(distDir, 'index.html')
+  const directoryIndex = join(candidate, 'index.html')
+  const safeCandidate = candidate.startsWith(distDir)
+  const filePath = safeCandidate && existsSync(candidate) && statSync(candidate).isFile()
+    ? candidate
+    : safeCandidate && existsSync(directoryIndex) && statSync(directoryIndex).isFile()
+      ? directoryIndex
+      : join(distDir, 'index.html')
 
   if (!existsSync(filePath)) {
     response.writeHead(404, { ...securityHeaders(), 'Content-Type': 'text/plain; charset=utf-8' })

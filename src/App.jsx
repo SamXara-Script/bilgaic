@@ -109,6 +109,7 @@ const tierFilters = [
 
 const staticAuthStorageKey = 'sez-demo-auth-reset-2026-09-03'
 const legacyStaticAuthStorageKeys = ['sez-demo-auth']
+const adminAccessKeyStorageKey = 'sez-admin-access-key'
 const languageStorageKey = 'sez-language'
 const defaultInviteCode = 'SEZ2026'
 const emptyWallet = { id: '', balance: 0 }
@@ -175,6 +176,10 @@ const supportTutorials = [
 const supportTutorialMap = Object.fromEntries(supportTutorials.map((tutorial) => [tutorial.id, tutorial]))
 
 function App() {
+  return isAdminRoute() ? <AdminApp /> : <CustomerApp />
+}
+
+function CustomerApp() {
   const [activeView, setActiveView] = useState('home')
   const [tierFilter, setTierFilter] = useState('all')
   const [notice, setNotice] = useState('')
@@ -545,6 +550,89 @@ function AuthScreen({ mode, onModeChange, onAuthenticate }) {
     <section className="auth-visual" aria-hidden="true"><div className="auth-brand">SEZ<span /></div><div className="auth-visual-copy"><p>Secure investing workspace</p><h1>Invest with a clearer view.</h1><div><strong>$0.00</strong><span>Start with a personal wallet and choose your first plan when ready.</span></div></div></section>
     <section className="auth-main"><div className="auth-card"><div className="auth-mobile-brand">SEZ<span /></div><p className="eyebrow">Customer access</p><h1>{isRegister ? 'Create your account' : 'Welcome back'}</h1><p className="auth-subtitle">{isRegister ? 'Enter a member invite code to open your investor profile.' : 'Sign in to your investor workspace.'}</p><form onSubmit={submit}>{isRegister && <label>Full name<input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" required /></label>}<label>Email address<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label><label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={isRegister ? 'new-password' : 'current-password'} minLength="8" required /></label>{isRegister && <label>Invite code<input value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} autoComplete="off" required /></label>}{error && <p className="auth-error" role="alert">{error}</p>}<button className="auth-submit" type="submit" disabled={submitting}>{submitting ? 'Please wait...' : isRegister ? 'Create account' : 'Log in'}</button></form><p className="auth-switch">{isRegister ? 'Already have an account?' : 'New to SEZ?'} <button type="button" onClick={switchMode}>{isRegister ? 'Log in' : 'Create account'}</button></p></div></section>
     <TelegramSupportButton />
+  </main>
+}
+
+function AdminApp() {
+  const [snapshot, setSnapshot] = useState(readInitialAdminSnapshot)
+  const [accessKey, setAccessKey] = useState(readSavedAdminAccessKey)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const summary = snapshot.summary
+  const users = snapshot.users || []
+  const transactions = snapshot.transactions || []
+
+  function loadBrowserSnapshot() {
+    try {
+      setSnapshot(readStaticAdminSnapshot())
+      setError('')
+    } catch (loadError) {
+      setError(loadError.message)
+    }
+  }
+
+  async function loadServerSnapshot(event) {
+    event.preventDefault()
+    const key = accessKey.trim()
+    if (!key) {
+      setError('Enter the server admin access key.')
+      return
+    }
+
+    setLoading(true)
+    setError('')
+    try {
+      const nextSnapshot = await requestAdminSnapshot(key)
+      saveAdminAccessKey(key)
+      setSnapshot(nextSnapshot)
+    } catch (loadError) {
+      setError(loadError.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return <main className="admin-shell">
+    <header className="admin-topbar">
+      <a className="admin-brand" href={getCustomerAppUrl()}>SEZ<span />Admin</a>
+      <div className="admin-actions"><button type="button" onClick={loadBrowserSnapshot}><Icon name="refresh" />Refresh</button><a href={getCustomerAppUrl()}>Customer app</a></div>
+    </header>
+
+    <section className="admin-hero">
+      <div><p className="eyebrow">Operations</p><h1>Admin Dashboard</h1><p>{snapshot.sourceLabel} updated {formatShortDateTime(snapshot.generatedAt)}</p></div>
+      <div className="admin-source-tabs" role="tablist" aria-label="Admin data source">
+        <button className={snapshot.sourceType === 'browser' ? 'active' : ''} type="button" onClick={loadBrowserSnapshot}><Icon name="grid" />Browser data</button>
+        <button className={snapshot.sourceType === 'server' ? 'active' : ''} type="submit" form="admin-server-form"><Icon name="shield" />Server API</button>
+      </div>
+    </section>
+
+    <form className="admin-key-form" id="admin-server-form" onSubmit={loadServerSnapshot}>
+      <label>Server access key<input type="password" value={accessKey} onChange={(event) => setAccessKey(event.target.value)} autoComplete="off" /></label>
+      <button type="submit" disabled={loading}>{loading ? 'Loading...' : 'Load server'}</button>
+    </form>
+
+    {error && <div className="admin-alert" role="alert"><Icon name="shield" /><span>{error}</span></div>}
+
+    <section className="admin-metrics">
+      <AdminMetric label="Customers" value={String(summary.totalUsers)} detail={`${summary.verifiedUsers} verified`} icon="users" tone="blue" />
+      <AdminMetric label="Wallet Balance" value={formatMoney(summary.walletBalance)} detail={`${summary.activePlans} active plans`} icon="wallet" tone="teal" />
+      <AdminMetric label="Recharged" value={formatMoney(summary.totalRecharged)} detail={`${summary.pendingWithdrawals} pending withdrawals`} icon="plus" tone="gold" />
+      <AdminMetric label="Withdrawn" value={formatMoney(summary.totalWithdrawn)} detail="Customer debit total" icon="arrow-up" tone="violet" />
+    </section>
+
+    <div className="admin-grid">
+      <section className="admin-panel admin-users-panel">
+        <SectionHeader title="Customers" action={`${users.length} total`} />
+        <div className="admin-user-list">{users.length ? users.map((item) => <AdminUserRow key={item.id} user={item} />) : <EmptyAdminState label="No customers yet" />}</div>
+      </section>
+
+      <section className="admin-panel admin-wallet-panel">
+        <SectionHeader title="Recharge Wallet" action="USDT TRC20" />
+        <div className="admin-wallet-card"><span className="crypto-mark teal">U</span><div><p className="micro-label">Deposit address</p><strong>{rechargeAddresses.USDT.TRC20}</strong></div></div>
+        <SectionHeader title="Recent Transactions" action={`${transactions.length} shown`} />
+        <div className="admin-transaction-list">{transactions.length ? transactions.map((item) => <AdminTransactionRow key={item.id} transaction={item} />) : <EmptyAdminState label="No transactions yet" />}</div>
+      </section>
+    </div>
   </main>
 }
 
@@ -1079,6 +1167,35 @@ function Metric({ label, value, green = false }) {
   return <div className="metric"><p className="micro-label">{label}</p><strong className={green ? 'positive' : ''}>{value}</strong></div>
 }
 
+function AdminMetric({ label, value, detail, icon, tone }) {
+  return <article className={`admin-metric ${tone}`}><span><Icon name={icon} /></span><div><p className="micro-label">{label}</p><strong>{value}</strong><small>{detail}</small></div></article>
+}
+
+function EmptyAdminState({ label }) {
+  return <div className="admin-empty"><Icon name="grid" /><span>{label}</span></div>
+}
+
+function AdminUserRow({ user }) {
+  return <article className="admin-user-row">
+    <div className="admin-user-main"><span>{String(user.name || 'A').slice(0, 1).toUpperCase()}</span><div><h3>{user.name}</h3><p>{user.email}</p><small>{user.inviteCode || 'No invite code'}</small></div></div>
+    <div className="admin-user-numbers">
+      <span><strong>{formatMoney(user.walletBalance)}</strong><small>Wallet</small></span>
+      <span><strong>{user.purchasesCount}</strong><small>Plans</small></span>
+      <span><strong>{user.referralCount}</strong><small>Referrals</small></span>
+    </div>
+    <div className="admin-user-state"><strong className={user.verified ? 'verified' : ''}>{user.verified ? 'Verified' : 'Unverified'}</strong><small>{formatShortDate(user.lastActivity || user.createdAt)}</small></div>
+  </article>
+}
+
+function AdminTransactionRow({ transaction }) {
+  const isCredit = ['recharge', 'earning', 'referral_deposit', 'referral_task'].includes(transaction.type)
+  return <article className="admin-transaction-row">
+    <span className={`activity-icon ${getTransactionTone(transaction.type)}`}><Icon name={isCredit ? 'plus' : 'arrow-up'} /></span>
+    <div><h3>{formatAdminType(transaction.type)}</h3><p>{transaction.userName || 'Customer'} - {[transaction.status, transaction.crypto, transaction.network].filter(Boolean).join(' / ') || 'Wallet activity'}</p></div>
+    <strong className={isCredit ? 'positive' : 'negative'}>{isCredit ? '+' : '-'}{formatMoney(transaction.amount)}</strong>
+  </article>
+}
+
 function getOverviewItems(portfolio) {
   return [
     { label: 'Daily', value: formatMoney(portfolio.dailyIncome), note: 'projected', color: '#4a91ff', bars: [10, 16, 13, 21, 18, 25, 30, 26] },
@@ -1134,6 +1251,158 @@ function parseClientDate(value) {
   const normalized = String(value).includes('T') ? String(value) : String(value).replace(' ', 'T')
   const date = new Date(normalized.endsWith('Z') ? normalized : `${normalized}Z`)
   return Number.isNaN(date.getTime()) ? null : date
+}
+
+function isAdminRoute() {
+  const path = window.location.pathname.replace(/\/+$/, '').toLowerCase()
+  return path === '/admin' || path.endsWith('/admin')
+}
+
+function getCustomerAppUrl() {
+  const path = window.location.pathname
+  const normalized = path.replace(/\/+$/, '')
+  const adminIndex = normalized.toLowerCase().lastIndexOf('/admin')
+  const basePath = adminIndex >= 0 ? normalized.slice(0, adminIndex + 1) : '/'
+  return `${window.location.origin}${basePath}`
+}
+
+function readInitialAdminSnapshot() {
+  try {
+    return readStaticAdminSnapshot()
+  } catch {
+    return createEmptyAdminSnapshot('Browser data', 'browser')
+  }
+}
+
+function readSavedAdminAccessKey() {
+  try {
+    return window.sessionStorage.getItem(adminAccessKeyStorageKey) || ''
+  } catch {
+    return ''
+  }
+}
+
+function saveAdminAccessKey(accessKey) {
+  try {
+    window.sessionStorage.setItem(adminAccessKeyStorageKey, accessKey)
+  } catch {
+    // The key still applies for the current form state.
+  }
+}
+
+async function requestAdminSnapshot(accessKey) {
+  const response = await fetch('/api/admin/summary', {
+    headers: { 'X-Admin-Key': accessKey },
+    credentials: 'include',
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(payload.error || 'Unable to load server admin data.')
+  return normalizeAdminSnapshot(payload, 'Server API', 'server')
+}
+
+function readStaticAdminSnapshot() {
+  const state = readStaticAuthState()
+  const users = state.users.map((account) => {
+    const transactions = Array.isArray(account.transactions) ? account.transactions : []
+    const purchases = Array.isArray(account.purchases) ? account.purchases : []
+    const totalRecharged = sumAdminTransactions(transactions, 'recharge')
+    const totalWithdrawn = sumAdminTransactions(transactions, 'withdrawal')
+    return {
+      id: account.id,
+      name: account.name,
+      email: account.email,
+      verified: Boolean(account.verified),
+      inviteCode: account.inviteCode,
+      walletId: account.wallet?.id || '',
+      walletBalance: Number(account.wallet?.balance) || 0,
+      purchasesCount: purchases.length,
+      referralCount: getStaticDirectReferrals(state, account.id).length,
+      transactionsCount: transactions.length,
+      pendingWithdrawals: transactions.filter((transaction) => transaction.type === 'withdrawal' && transaction.status === 'Pending').length,
+      totalIncome: calculateTotalIncome(transactions),
+      totalRecharged,
+      totalWithdrawn,
+      createdAt: account.createdAt,
+      lastActivity: getLatestAdminDate([...transactions, ...purchases]),
+    }
+  })
+  const transactions = state.users.flatMap((account) => {
+    return (Array.isArray(account.transactions) ? account.transactions : []).map((transaction, index) => ({
+      ...transaction,
+      id: `${account.id}-${index}-${transaction.createdAt || index}`,
+      userId: account.id,
+      userName: account.name,
+      userEmail: account.email,
+    }))
+  }).sort(compareAdminDateDesc).slice(0, 80)
+
+  return normalizeAdminSnapshot({ users, transactions }, 'Browser data', 'browser')
+}
+
+function normalizeAdminSnapshot(snapshot, sourceLabel, sourceType) {
+  const users = (snapshot.users || []).map((user) => ({
+    ...user,
+    verified: Boolean(user.verified),
+    walletBalance: Number(user.walletBalance) || 0,
+    purchasesCount: Number(user.purchasesCount) || 0,
+    referralCount: Number(user.referralCount) || 0,
+    transactionsCount: Number(user.transactionsCount) || 0,
+    pendingWithdrawals: Number(user.pendingWithdrawals) || 0,
+    totalIncome: Number(user.totalIncome) || 0,
+    totalRecharged: Number(user.totalRecharged) || 0,
+    totalWithdrawn: Number(user.totalWithdrawn) || 0,
+  }))
+  const transactions = (snapshot.transactions || []).map((transaction, index) => ({
+    ...transaction,
+    id: transaction.id || `transaction-${index}`,
+    amount: Number(transaction.amount) || 0,
+  }))
+  const summary = snapshot.summary || {
+    totalUsers: users.length,
+    verifiedUsers: users.filter((user) => user.verified).length,
+    walletBalance: roundClientMoney(users.reduce((total, user) => total + user.walletBalance, 0)),
+    activePlans: users.reduce((total, user) => total + user.purchasesCount, 0),
+    totalRecharged: roundClientMoney(users.reduce((total, user) => total + user.totalRecharged, 0)),
+    totalWithdrawn: roundClientMoney(users.reduce((total, user) => total + user.totalWithdrawn, 0)),
+    pendingWithdrawals: users.reduce((total, user) => total + user.pendingWithdrawals, 0),
+  }
+  return {
+    sourceLabel: snapshot.sourceLabel || sourceLabel,
+    sourceType: snapshot.sourceType || sourceType,
+    generatedAt: snapshot.generatedAt || new Date().toISOString(),
+    summary: {
+      totalUsers: Number(summary.totalUsers) || 0,
+      verifiedUsers: Number(summary.verifiedUsers) || 0,
+      walletBalance: Number(summary.walletBalance) || 0,
+      activePlans: Number(summary.activePlans) || 0,
+      totalRecharged: Number(summary.totalRecharged) || 0,
+      totalWithdrawn: Number(summary.totalWithdrawn) || 0,
+      pendingWithdrawals: Number(summary.pendingWithdrawals) || 0,
+    },
+    users,
+    transactions,
+  }
+}
+
+function createEmptyAdminSnapshot(sourceLabel, sourceType) {
+  return normalizeAdminSnapshot({ users: [], transactions: [] }, sourceLabel, sourceType)
+}
+
+function sumAdminTransactions(transactions, type) {
+  return roundClientMoney((transactions || []).reduce((total, transaction) => transaction.type === type ? total + (Number(transaction.amount) || 0) : total, 0))
+}
+
+function getLatestAdminDate(items) {
+  const timestamps = (items || []).map((item) => parseClientDate(item.createdAt)?.getTime() || 0).filter(Boolean)
+  return timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : null
+}
+
+function compareAdminDateDesc(left, right) {
+  return (parseClientDate(right.createdAt)?.getTime() || 0) - (parseClientDate(left.createdAt)?.getTime() || 0)
+}
+
+function formatAdminType(type) {
+  return String(type || 'transaction').split('_').map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`).join(' ')
 }
 
 function readSavedLanguage() {
@@ -1808,6 +2077,7 @@ function Icon({ name }) {
     bell: <><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></>,
     clock: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></>,
     globe: <><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17" /><path d="M12 3.5c2.3 2.2 3.5 5 3.5 8.5s-1.2 6.3-3.5 8.5M12 3.5c-2.3 2.2-3.5 5-3.5 8.5s1.2 6.3 3.5 8.5" /></>,
+    refresh: <><path d="M20 6v5h-5" /><path d="M4 18v-5h5" /><path d="M18.1 9A7 7 0 0 0 6.2 6.8L4 9M20 15l-2.2 2.2A7 7 0 0 1 5.9 15" /></>,
     chevron: <path d="m9 5 7 7-7 7" />,
   }
   return <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>
