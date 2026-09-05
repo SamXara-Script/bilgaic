@@ -725,7 +725,7 @@ function InvestView({ filter, onFilter, tiers: tierItems, portfolio, payoutTimer
       <section className="investment-summary">
         <div className="summary-topline">
           <div><p className="eyebrow">Investment</p><h1>Maining Devices</h1></div>
-          <div className="active-tier"><span>Active</span><strong>{portfolio.activeTiers} Plans</strong></div>
+          <div className="active-tier"><span>Active</span><strong>{`${portfolio.activeTiers} Plans`}</strong></div>
         </div>
         <div className="summary-metrics"><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label="Total Income" value={formatMoney(portfolio.totalIncome)} green /><Metric label="1 Month Result" value={formatMoney(portfolio.oneMonthResult)} /><Metric label="Next Payout" value={payoutTimer ? formatCountdown(payoutTimer.remainingMs) : 'No active plan'} /></div>
       </section>
