@@ -118,6 +118,7 @@ const uploadMaxBytes = 3 * 1024 * 1024
 const documentUploadTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
 const faceUploadTypes = ['image/jpeg', 'image/png', 'image/webp']
 const supportChangeMessage = 'Contact support to change customer name or Gmail.'
+const staticAdminTestAccessKeyHash = 'f9e1a7f30eb12efc8c3984a68d0d85be22133982f0a3c4c7f77ace1338d517f3'
 const walletHistoryFilters = [
   { id: 'recharge', label: 'Recharge History', emptyMessage: 'No recharge history yet' },
   { id: 'withdrawal', label: 'Withdraw History', emptyMessage: 'No withdraw history yet' },
@@ -1302,16 +1303,34 @@ function getCustomerAppUrl() {
 }
 
 async function requestAdminSnapshot(accessKey) {
-  const response = await fetch('/api/admin/summary', {
-    headers: { 'X-Admin-Key': accessKey },
-    credentials: 'include',
-  })
+  let response
+  try {
+    response = await fetch('/api/admin/summary', {
+      headers: { 'X-Admin-Key': accessKey },
+      credentials: 'include',
+    })
+  } catch {
+    return requestStaticAdminSnapshot(accessKey)
+  }
+
   const payload = await response.json().catch(() => null)
   if (!response.ok) {
-    if (!payload?.error && response.status === 404) throw new Error('Admin login requires the backend server with ADMIN_ACCESS_KEY configured.')
+    if (!payload?.error && response.status === 404) return requestStaticAdminSnapshot(accessKey)
     throw new Error(payload?.error || 'Unable to load server admin data.')
   }
   return normalizeAdminSnapshot(payload, 'Server API', 'server')
+}
+
+async function requestStaticAdminSnapshot(accessKey) {
+  if (!globalThis.crypto?.subtle || typeof TextEncoder === 'undefined') throw new Error('Admin login requires the backend server with ADMIN_ACCESS_KEY configured.')
+  if (!await isStaticAdminTestAccessKey(accessKey)) throw new Error('Admin access key is invalid.')
+  return createEmptyAdminSnapshot('GitHub Pages test mode', 'static')
+}
+
+async function isStaticAdminTestAccessKey(accessKey) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(accessKey))
+  const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+  return hash === staticAdminTestAccessKeyHash
 }
 
 function normalizeAdminSnapshot(snapshot, sourceLabel, sourceType) {
