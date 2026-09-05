@@ -49,6 +49,7 @@ const rechargeAddresses = {
 
 const projectedMonthlyRate = 0.24
 const withdrawalFeeRate = 0.16
+const weeklyProfitDays = 7
 const profitWindowDays = 17
 const payoutCycleMs = 24 * 60 * 60 * 1000
 const telegramSupportUrl = 'https://t.me/+J82Rio5xns1lY2Ni'
@@ -726,7 +727,7 @@ function InvestView({ filter, onFilter, tiers: tierItems, portfolio, payoutTimer
           <div><p className="eyebrow">Investment</p><h1>Maining Devices</h1></div>
           <div className="active-tier"><span>Active</span><strong>{portfolio.activeTiers} Plans</strong></div>
         </div>
-        <div className="summary-metrics"><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label={`${profitWindowDays} Day Profit`} value={formatMoney(portfolio.periodProfit)} green /><Metric label="1 Month Result" value={formatMoney(portfolio.oneMonthResult)} /><Metric label="Next Payout" value={payoutTimer ? formatCountdown(payoutTimer.remainingMs) : 'No active plan'} /></div>
+        <div className="summary-metrics"><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label="Total Income" value={formatMoney(portfolio.totalIncome)} green /><Metric label="1 Month Result" value={formatMoney(portfolio.oneMonthResult)} /><Metric label="Next Payout" value={payoutTimer ? formatCountdown(payoutTimer.remainingMs) : 'No active plan'} /></div>
       </section>
 
       <div className="filter-row" role="tablist" aria-label="Maining plans">
@@ -934,9 +935,9 @@ function TierCard({ tier, owned, now, onReadMore }) {
       </div>
       <div className="risk-row"><span className="micro-label">Daily Payout</span><strong>{tier.risk}</strong></div>
       <div className="risk-track"><span style={{ width: `${tier.riskValue}%` }} /></div>
-      <div className="tier-stats"><Metric label="Daily Income" value={formatMoney(projection.dailyIncome)} /><Metric label={`${profitWindowDays} Day Profit`} value={formatMoney(projection.periodProfit)} /><Metric label="1 Month Result" value={formatMoney(projection.monthResult)} /></div>
+      <div className="tier-stats"><Metric label="Daily Income" value={formatMoney(projection.dailyIncome)} /><Metric label="Weekly Profit" value={formatMoney(projection.weeklyProfit)} /><Metric label="1 Month Result" value={formatMoney(projection.monthResult)} /></div>
       {payoutTimer && <PayoutTimer timer={payoutTimer} />}
-      {!owned && <PrimaryButton label="Read More" onClick={() => onReadMore(tier)} />}
+      {!owned && <PrimaryButton label="Read more" onClick={() => onReadMore(tier)} />}
     </article>
   )
 }
@@ -951,8 +952,8 @@ function MainingDetailsView({ tier, owned, payoutTimer, onBack, onBuy }) {
         <p className="eyebrow">Maining plan</p>
         <span className="vip-pill"><span />{tier.level}</span>
         <h1>{tier.title}</h1>
-        <p>Maining is a customer plan that connects your account balance to a selected mining package. The dashboard tracks the plan price, daily payout, {profitWindowDays}-day profit, and 1 month result.</p>
-        <div className="maining-metrics"><Metric label="Plan Price" value={formatMoney(tier.price)} /><Metric label="Daily Payout" value={formatMoney(projection.dailyIncome)} green /><Metric label={`${profitWindowDays} Day Profit`} value={formatMoney(projection.periodProfit)} /><Metric label="1 Month Result" value={formatMoney(projection.monthResult)} /></div>
+        <p>Maining is a customer plan that connects your account balance to a selected mining package. The dashboard tracks the plan price, daily payout, weekly profit, and 1 month result.</p>
+        <div className="maining-metrics"><Metric label="Plan Price" value={formatMoney(tier.price)} /><Metric label="Daily Payout" value={formatMoney(projection.dailyIncome)} green /><Metric label="Weekly Profit" value={formatMoney(projection.weeklyProfit)} /><Metric label="1 Month Result" value={formatMoney(projection.monthResult)} /></div>
         {payoutTimer && <PayoutTimer timer={payoutTimer} />}
         <PrimaryButton label={owned ? 'Purchased' : 'Buy Now'} icon="check" disabled={owned} onClick={() => onBuy(tier)} />
       </section>
@@ -987,7 +988,7 @@ function PurchasedTiers({ purchases, now, onReadMore }) {
   return <div className="purchased-list">{purchases.map((purchase) => {
     const projection = getTierProjection(purchase.price, purchase.monthlyRate)
     const payoutTimer = getPurchasePayoutTimer(purchase, now)
-    return <article className="purchased-tier" key={purchase.id} style={{ '--accent': purchase.color }}><div><span className="vip-pill"><span />{purchase.level}</span><h3>{purchase.title}</h3><p>Daily {formatMoney(projection.dailyIncome)} - {profitWindowDays} day {formatMoney(projection.periodProfit)}</p>{payoutTimer && <small className="purchased-countdown"><Icon name="clock" />{formatCountdown(payoutTimer.remainingMs)} left</small>}</div><div className="purchased-tier-actions"><strong>{formatMoney(purchase.price)}</strong><button type="button" onClick={() => onReadMore(purchase)}>Read More</button></div></article>
+    return <article className="purchased-tier" key={purchase.id} style={{ '--accent': purchase.color }}><div><span className="vip-pill"><span />{purchase.level}</span><h3>{purchase.title}</h3><p>Daily {formatMoney(projection.dailyIncome)} - {profitWindowDays} day {formatMoney(projection.periodProfit)}</p>{payoutTimer && <small className="purchased-countdown"><Icon name="clock" />{formatCountdown(payoutTimer.remainingMs)} left</small>}</div><div className="purchased-tier-actions"><strong>{formatMoney(purchase.price)}</strong><button type="button" onClick={() => onReadMore(purchase)}>Read more</button></div></article>
   })}</div>
 }
 
@@ -1243,7 +1244,8 @@ function getTierProjection(amount, monthlyRate = projectedMonthlyRate) {
   const dailyIncome = plan ? plan.dailyIncome : numericAmount * monthlyRate / 30
   const monthlyProfit = plan ? dailyIncome * 30 : numericAmount * monthlyRate
   const periodProfit = dailyIncome * profitWindowDays
-  return { dailyIncome, periodProfit, monthlyProfit, monthResult: numericAmount + monthlyProfit }
+  const weeklyProfit = dailyIncome * weeklyProfitDays
+  return { dailyIncome, weeklyProfit, periodProfit, monthlyProfit, monthResult: numericAmount + monthlyProfit }
 }
 
 function getPortfolioPayoutTimer(purchases, now = Date.now()) {
