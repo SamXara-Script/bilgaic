@@ -95,6 +95,9 @@ db.exec(`
     referred_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     wallet_id TEXT UNIQUE,
     wallet_balance REAL NOT NULL DEFAULT 0,
+    registration_ip TEXT,
+    last_login_ip TEXT,
+    last_login_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -162,6 +165,9 @@ ensureColumn('users', 'registration_invite_code', 'registration_invite_code TEXT
 ensureColumn('users', 'referred_by_user_id', 'referred_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL')
 ensureColumn('users', 'wallet_id', 'wallet_id TEXT')
 ensureColumn('users', 'wallet_balance', 'wallet_balance REAL NOT NULL DEFAULT 0')
+ensureColumn('users', 'registration_ip', 'registration_ip TEXT')
+ensureColumn('users', 'last_login_ip', 'last_login_ip TEXT')
+ensureColumn('users', 'last_login_at', 'last_login_at TEXT')
 migrateUserAccounts()
 db.exec(`
   CREATE UNIQUE INDEX IF NOT EXISTS users_invite_code_unique ON users(invite_code);
@@ -191,9 +197,10 @@ const queries = {
     WHERE child.id = ?
   `),
   createUser: db.prepare(`
-    INSERT INTO users (name, email, password_salt, password_hash, verified, invite_code, registration_invite_code, referred_by_user_id, wallet_id, wallet_balance)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO users (name, email, password_salt, password_hash, verified, invite_code, registration_invite_code, referred_by_user_id, wallet_id, wallet_balance, registration_ip, last_login_ip, last_login_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
   `),
+  updateLoginAudit: db.prepare('UPDATE users SET last_login_ip = ?, last_login_at = CURRENT_TIMESTAMP WHERE id = ?'),
   updatePassword: db.prepare('UPDATE users SET password_salt = ?, password_hash = ? WHERE id = ?'),
   updateWalletBalance: db.prepare('UPDATE users SET wallet_balance = wallet_balance + ? WHERE id = ?'),
   updateVerificationStatus: db.prepare('UPDATE users SET verified = ? WHERE id = ?'),
@@ -257,6 +264,9 @@ const queries = {
       ) AS referredByName,
       u.wallet_id AS walletId,
       u.wallet_balance AS walletBalance,
+      u.registration_ip AS registrationIp,
+      u.last_login_ip AS lastLoginIp,
+      u.last_login_at AS lastLoginAt,
       u.created_at AS createdAt,
       (SELECT document_type FROM verification_submissions AS vs WHERE vs.user_id = u.id ORDER BY vs.id DESC LIMIT 1) AS verificationDocumentType,
       (SELECT document_name FROM verification_submissions AS vs WHERE vs.user_id = u.id ORDER BY vs.id DESC LIMIT 1) AS documentName,
@@ -376,7 +386,8 @@ async function handleApi(request, response, url) {
     if (queries.findUserByEmail.get(email)) throw httpError(409, 'An account already uses this email address.')
 
     const { salt, hash } = hashPassword(password)
-    const result = queries.createUser.run(name, email, salt, hash, 0, createInviteCode(), invitation.inviteCode, invitation.inviterId, createWalletId(), 0)
+    const registrationIp = getClientIp(request)
+    const result = queries.createUser.run(name, email, salt, hash, 0, createInviteCode(), invitation.inviteCode, invitation.inviterId, createWalletId(), 0, registrationIp, registrationIp)
     const user = queries.findUserById.get(Number(result.lastInsertRowid))
     const token = createSession(user.id)
     sendAccountPayload(response, 201, user, { 'Set-Cookie': sessionCookie(token) })
@@ -392,6 +403,7 @@ async function handleApi(request, response, url) {
     if (!record || !verifyPassword(password, record.passwordSalt, record.passwordHash)) throw httpError(401, 'Invalid email or password.')
 
     const user = toPublicUser(record)
+    queries.updateLoginAudit.run(getClientIp(request), user.id)
     const token = createSession(user.id)
     sendAccountPayload(response, 200, record, { 'Set-Cookie': sessionCookie(token) })
     return
@@ -635,6 +647,9 @@ function toAdminUser(record) {
     referredByName: record.referredByName,
     walletId: record.walletId,
     walletBalance: Number(record.walletBalance) || 0,
+    registrationIp: record.registrationIp,
+    lastLoginIp: record.lastLoginIp,
+    lastLoginAt: record.lastLoginAt,
     purchasesCount: Number(record.purchasesCount) || 0,
     referralCount: Number(record.referralCount) || 0,
     transactionsCount: Number(record.transactionsCount) || 0,
@@ -647,7 +662,7 @@ function toAdminUser(record) {
     documentName: record.documentName,
     faceName: record.faceName,
     createdAt: record.createdAt,
-    lastActivity: latestDateValue(record.lastTransactionAt, record.lastPurchaseAt, record.lastVerificationAt, record.createdAt),
+    lastActivity: latestDateValue(record.lastLoginAt, record.lastTransactionAt, record.lastPurchaseAt, record.lastVerificationAt, record.createdAt),
   }
 }
 
@@ -962,7 +977,14 @@ function cleanupRateLimitBuckets(now) {
 
 function getClientIp(request) {
   const forwardedFor = String(request.headers['x-forwarded-for'] || '').split(',')[0].trim()
-  return forwardedFor || request.socket.remoteAddress || 'unknown'
+  return String(
+    request.headers['cf-connecting-ip'] ||
+    request.headers['x-real-ip'] ||
+    request.headers['fly-client-ip'] ||
+    forwardedFor ||
+    request.socket.remoteAddress ||
+    'unknown',
+  ).replace(/^::ffff:/, '')
 }
 
 function toPublicUser(record) {

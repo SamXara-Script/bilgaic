@@ -762,6 +762,12 @@ h1 { font-size: 20px; line-height: 1.15; }
   height: 18px;
 }
 
+.admin-alert.info {
+  border-color: rgba(75, 145, 255, .26);
+  color: #b9cdfa;
+  background: rgba(75, 145, 255, .08);
+}
+
 .admin-metrics {
   display: grid;
   gap: 10px;

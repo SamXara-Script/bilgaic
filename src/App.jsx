@@ -648,6 +648,7 @@ function AdminApp() {
     </section>
 
     {error && <div className="admin-alert" role="alert"><Icon name="shield" /><span>{error}</span></div>}
+    {snapshot.sourceType === 'static' && <div className="admin-alert info"><Icon name="shield" /><span>GitHub Pages test mode can only read customer data saved in this browser. Use the Node backend database to see every phone, PC, and real registration IP.</span></div>}
 
     <section className="admin-metrics">
       <AdminMetric label="Customers" value={String(summary.totalUsers)} detail={`${summary.verifiedUsers} verified`} icon="users" tone="blue" />
@@ -1234,6 +1235,9 @@ function AdminUserRow({ user }) {
       <span><strong>Document</strong><small>{user.documentName || user.verificationDocumentType || 'Not uploaded'}</small></span>
       <span><strong>Face Photo</strong><small>{user.faceName || 'Not uploaded'}</small></span>
       <span><strong>Joined</strong><small>{formatShortDate(user.createdAt)}</small></span>
+      <span><strong>Registration IP</strong><small>{user.registrationIp || 'Not captured'}</small></span>
+      <span><strong>Last Login IP</strong><small>{user.lastLoginIp || 'Not captured'}</small></span>
+      <span><strong>Last Login</strong><small>{formatShortDateTime(user.lastLoginAt)}</small></span>
     </div>
     <div className="admin-user-state"><strong className={user.verified ? 'verified' : ''}>{user.verified ? 'Verified' : 'Unverified'}</strong><small>{formatShortDate(user.lastActivity || user.createdAt)}</small></div>
   </article>
@@ -1370,6 +1374,9 @@ function createStaticAdminSnapshot(state) {
       referredByName: directParent?.name || '',
       walletId: account.wallet?.id || '',
       walletBalance: Number(account.wallet?.balance) || 0,
+      registrationIp: account.registrationIp || 'Static browser only',
+      lastLoginIp: account.lastLoginIp || account.registrationIp || 'Static browser only',
+      lastLoginAt: account.lastLoginAt || account.createdAt,
       purchasesCount: purchases.length,
       referralCount: getStaticReferrals(state, account.id).length,
       transactionsCount: transactions.length,
@@ -1383,6 +1390,7 @@ function createStaticAdminSnapshot(state) {
       faceName: account.verification?.faceName || '',
       createdAt: account.createdAt,
       lastActivity: latestClientDateValue(
+        account.lastLoginAt,
         account.createdAt,
         account.verification?.createdAt,
         ...purchases.map((purchase) => purchase.createdAt),
@@ -1692,6 +1700,9 @@ function handleStaticApi(path, options = {}) {
       purchases: [],
       transactions: [],
       dailyEarnings: [],
+      registrationIp: 'Static browser only',
+      lastLoginIp: 'Static browser only',
+      lastLoginAt: new Date().toISOString(),
     }
     state.nextUserId += 1
     state.sessionEmail = email
@@ -1707,6 +1718,8 @@ function handleStaticApi(path, options = {}) {
     if (!account || account.password !== password) throw new Error('Invalid email or password.')
 
     state.sessionEmail = email
+    account.lastLoginIp = account.lastLoginIp || 'Static browser only'
+    account.lastLoginAt = new Date().toISOString()
     writeStaticAuthState(state)
     return toStaticAccountPayload(account, state)
   }
@@ -1966,6 +1979,9 @@ function normalizeStaticAccount(account, index, inviteCodes, walletIds) {
     transactions: Array.isArray(account.transactions) ? account.transactions.map(normalizeStaticTransaction) : [],
     dailyEarnings: Array.isArray(account.dailyEarnings) ? account.dailyEarnings : [],
     referredByUserId: Number(account.referredByUserId) || null,
+    registrationIp: account.registrationIp || '',
+    lastLoginIp: account.lastLoginIp || '',
+    lastLoginAt: account.lastLoginAt || '',
     createdAt: account.createdAt || new Date().toISOString(),
   }
 }
