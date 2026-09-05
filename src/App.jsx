@@ -1098,7 +1098,7 @@ function LanguageView({ language, onBack, onChange }) {
       <section className="info-panel language-panel">
         <p className="eyebrow">Current language</p>
         <h2>{selectedLanguage.label}</h2>
-        <div className="verification-status verified"><Icon name="globe" /><span>{selectedLanguage.label} is selected for this browser.</span></div>
+        <div className="verification-status verified"><Icon name="globe" /><span>{`${selectedLanguage.label} is selected for this browser.`}</span></div>
       </section>
     </div>
   </section>
