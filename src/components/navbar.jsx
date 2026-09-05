@@ -1,17 +1,20 @@
+import { Brand } from './auth-screen.jsx'
+
 export function BottomNav({ items, activeId, onSelect }) {
   return <nav className="bottom-nav" aria-label="Main navigation">{items.map((item) => <button key={item.id} type="button" className={activeId === item.id ? 'active' : ''} aria-current={activeId === item.id ? 'page' : undefined} onClick={() => onSelect(item.id)}><NavIcon name={item.icon} /><span>{item.label}</span></button>)}</nav>
 }
 
-export function SideNav({ items, activeId, onSelect, onLogout, supportUrl }) {
+export function SideNav({ items, activeId, onSelect, onLogout, supportUrl, user }) {
   return (
     <aside className="side-nav">
-      <div className="side-brand"><span>SEZ</span><i /></div>
-      <p className="side-caption">Investor platform</p>
+      <button className="side-brand-button" type="button" aria-label="SEZ home" onClick={() => onSelect('home')}><Brand /></button>
+      <div className="workspace-label"><span className="workspace-monogram">S</span><div><strong>Personal workspace</strong><small>Investor account</small></div></div>
+      <p className="side-caption">WORKSPACE</p>
       <nav aria-label="Desktop navigation">
-        {items.map((item) => <button key={item.id} type="button" className={activeId === item.id ? 'active' : ''} onClick={() => onSelect(item.id)}><NavIcon name={item.icon} /><span>{item.label}</span></button>)}
+        {items.map((item) => <button key={item.id} type="button" className={activeId === item.id ? 'active' : ''} aria-current={activeId === item.id ? 'page' : undefined} onClick={() => onSelect(item.id)}><NavIcon name={item.icon} /><span>{item.label}</span>{activeId === item.id && <i className="nav-active-dot" />}</button>)}
       </nav>
-      <button className="side-logout" type="button" onClick={onLogout}><NavIcon name="logout" /><span>Sign out</span></button>
-      <a className="side-help" href={supportUrl} target="_blank" rel="noreferrer"><span>Need help?</span><strong>Telegram support</strong></a>
+      <a className="side-help" href={supportUrl} target="_blank" rel="noreferrer"><span className="help-icon"><NavIcon name="support" /></span><strong>A little guidance?</strong><span>We’re here when you need us.</span><b>Contact support <span aria-hidden="true">↗</span></b></a>
+      <div className="side-account"><button className="side-profile" type="button" onClick={() => onSelect('profile')}><span className="desktop-avatar">{user?.name?.slice(0, 1).toUpperCase() || 'S'}</span><span><strong>{user?.name || 'Account'}</strong><small>Personal account</small></span></button><button className="side-logout" type="button" onClick={onLogout} aria-label="Sign out" title="Sign out"><NavIcon name="logout" /></button></div>
     </aside>
   )
 }

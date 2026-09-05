@@ -1,4 +1,4 @@
-const tones = { blue: '#4a91ff', violet: '#a983ff', teal: '#1fe1b0', gold: '#f0b91a' }
+const tones = { blue: '#d3f979', violet: '#bca9e4', teal: '#b9e887', gold: '#e8bd9c' }
 
 export function IconButton({ label, icon, tone, onClick }) {
   return <button className="icon-action" type="button" style={{ '--tone': tones[tone] }} onClick={onClick}><span><ActionIcon name={icon} /></span><em>{label}</em></button>
@@ -14,6 +14,7 @@ export function SegmentButton({ label, active, onClick }) {
 
 function ActionIcon({ name }) {
   const paths = {
+    grid: <><rect x="4" y="4" width="16" height="6" rx="2" /><rect x="4" y="14" width="16" height="6" rx="2" /></>,
     plus: <><path d="M12 5v14M5 12h14" /></>,
     'arrow-up': <><path d="M12 19V5M6 11l6-6 6 6" /></>,
     download: <><path d="M12 4v10M8 10l4 4 4-4M5 20h14" /></>,

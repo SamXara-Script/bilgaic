@@ -55,16 +55,10 @@ const tierPlans = [
 const tierIds = ['starter', 'premium', 'elite', 'royal']
 const tierCatalog = Object.fromEntries(tierPlans.map(({ amount, dailyIncome }, index) => {
   const id = tierIds[index] || `vip-${index + 1}`
-  return [id, { id, level: `Maining ${index + 1}`, title: `Maining Plan ${index + 1}`, amount, dailyIncome }]
+  return [id, { id, level: `Mining ${index + 1}`, title: `Mining Plan ${index + 1}`, amount, dailyIncome }]
 }))
 
 const allowedCryptos = new Set(['USDT', 'BTC', 'ETH'])
-const allowedNetworks = new Set(['TRC20', 'ERC20', 'BEP20'])
-const rechargeAddresses = {
-  USDT: {
-    TRC20: 'TC8a7KAFSuBo9bfHuHRApFs678jGtMjznv',
-  },
-}
 const allowedDocumentTypes = new Set(['id', 'passport'])
 const allowedDocumentMimes = new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/webp'])
 const allowedFaceMimes = new Set(['image/jpeg', 'image/png', 'image/webp'])
@@ -154,7 +148,7 @@ db.exec(`
     face_name TEXT NOT NULL,
     face_mime TEXT NOT NULL,
     face_data TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'Verified',
+    status TEXT NOT NULL DEFAULT 'Pending',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
 `)
@@ -330,6 +324,13 @@ const queries = {
     ORDER BY wt.id DESC
     LIMIT 80
   `),
+  listIncomeHistory: db.prepare(`
+    SELECT date(created_at) AS date, ROUND(SUM(amount), 2) AS total
+    FROM wallet_transactions
+    WHERE user_id = ? AND type IN ('earning', 'referral_deposit', 'referral_task')
+      AND status IN ('Credited', 'Completed') AND datetime(created_at) >= datetime('now', '-31 days')
+    GROUP BY date(created_at) ORDER BY date(created_at)
+  `),
   sumIncomeTransactions: db.prepare(`
     SELECT COALESCE(SUM(amount), 0) AS totalIncome
     FROM wallet_transactions
@@ -423,6 +424,33 @@ async function handleApi(request, response, url) {
     return
   }
 
+  const verificationRoute = url.pathname.match(/^\/api\/admin\/verifications\/(\d+)$/)
+  if (verificationRoute) {
+    requireAdminRequest(request)
+    const userId = Number(verificationRoute[1])
+    const submission = db.prepare(`SELECT id, document_name AS documentName, document_mime AS documentMime, document_data AS documentData,
+      face_name AS faceName, face_mime AS faceMime, face_data AS faceData, status
+      FROM verification_submissions WHERE user_id = ? ORDER BY id DESC LIMIT 1`).get(userId)
+    if (!submission) throw httpError(404, 'No verification documents were submitted.')
+    if (request.method === 'GET') {
+      sendJson(response, 200, submission, { 'Cache-Control': 'no-store' })
+      return
+    }
+    if (request.method === 'POST') {
+      const body = await readBody(request)
+      if (!['Verified', 'Rejected'].includes(body.status)) throw httpError(400, 'Choose a valid verification decision.')
+      if (submission.status !== 'Pending' || body.submissionId !== submission.id) throw httpError(409, 'This submission changed. Refresh before reviewing it.')
+      runInTransaction(() => {
+        const updated = db.prepare("UPDATE verification_submissions SET status = ? WHERE id = ? AND status = 'Pending'").run(body.status, submission.id)
+        if (Number(updated.changes) !== 1) throw httpError(409, 'This submission has already been reviewed.')
+        queries.updateVerificationStatus.run(body.status === 'Verified' ? 1 : 0, userId)
+      })
+      sendJson(response, 200, { status: body.status })
+      return
+    }
+    throw httpError(405, 'Method not allowed.')
+  }
+
   const user = requireUser(request)
 
   if (request.method === 'GET' && url.pathname === '/api/session') {
@@ -458,6 +486,8 @@ async function handleApi(request, response, url) {
   }
 
   if (request.method === 'POST' && url.pathname === '/api/verification') {
+    if (user.verified) throw httpError(409, 'Your account is already verified.')
+    if (queries.findLatestVerification.get(user.id)?.status === 'Pending') throw httpError(409, 'Your documents are already awaiting review.')
     const body = await readBody(request)
     const documentType = requireVerificationDocumentType(body.documentType)
     const documentFile = requireUpload(body.document, 'ID or passport document', allowedDocumentMimes)
@@ -473,9 +503,8 @@ async function handleApi(request, response, url) {
         faceFile.name,
         faceFile.mime,
         faceFile.data,
-        'Verified',
+        'Pending',
       )
-      queries.updateVerificationStatus.run(1, user.id)
     })
 
     const record = queries.findUserById.get(user.id)
@@ -488,7 +517,7 @@ async function handleApi(request, response, url) {
     requireVerifiedUser(user)
     const tier = tierCatalog[body.tierId]
     const crypto = String(body.crypto || '').toUpperCase()
-    if (!tier) throw httpError(400, 'Choose a valid Maining plan.')
+    if (!tier) throw httpError(400, 'Choose a valid Mining plan.')
     if (!allowedCryptos.has(crypto)) throw httpError(400, 'Choose a supported cryptocurrency.')
 
     try {
@@ -515,29 +544,8 @@ async function handleApi(request, response, url) {
   }
 
   if (request.method === 'POST' && url.pathname === '/api/recharges') {
-    const body = await readBody(request)
     requireVerifiedUser(user)
-    const amount = requireAmount(body.amount)
-    const crypto = String(body.crypto || '').toUpperCase()
-    const network = String(body.network || '').trim().toUpperCase()
-
-    if (!allowedCryptos.has(crypto)) throw httpError(400, 'Choose a supported cryptocurrency.')
-    if (!allowedNetworks.has(network)) throw httpError(400, 'Choose a supported network.')
-
-    runInTransaction(() => {
-      queries.updateWalletBalance.run(amount, user.id)
-      queries.createWalletTransaction.run(user.id, 'recharge', amount, crypto, network, walletAddress(user, crypto, network), 'Wallet recharge', 'Credited')
-      creditReferralCommissions(user.id, amount, crypto, 'deposit')
-    })
-
-    const record = queries.findUserById.get(user.id)
-    sendJson(response, 201, {
-      recharge: { amount, crypto, network, status: 'Credited' },
-      wallet: toPublicWallet(record),
-      transactions: queries.listWalletTransactions.all(user.id).map(toPublicWalletTransaction),
-      totalIncome: getTotalIncome(user.id),
-    })
-    return
+    throw httpError(503, 'Deposits require payment confirmation. Contact support after transferring funds.')
   }
 
   if (request.method === 'POST' && url.pathname === '/api/withdrawals') {
@@ -713,9 +721,12 @@ function requireInviteCode(value) {
 }
 
 function requireAmount(value) {
-  const amount = Number(value)
-  if (!Number.isFinite(amount) || amount <= 0) throw httpError(400, 'Enter a valid recharge amount.')
-  return amount
+  if (typeof value !== 'number' && typeof value !== 'string') throw httpError(400, 'Enter a valid amount.')
+  const text = String(value).trim()
+  if (!/^\d+(?:\.\d{1,2})?$/.test(text)) throw httpError(400, 'Enter an amount with no more than two decimal places.')
+  const amount = Number(text)
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 1000000000) throw httpError(400, 'Enter a valid amount.')
+  return Math.round(amount * 100) / 100
 }
 
 function requireVerificationDocumentType(value) {
@@ -786,7 +797,7 @@ function syncAllVipEarnings() {
     try {
       syncVipEarnings(user.id)
     } catch (error) {
-      console.error(`Unable to sync Maining earnings for user ${user.id}:`, error.message)
+      console.error(`Unable to sync Mining earnings for user ${user.id}:`, error.message)
     }
   }
 }
@@ -1042,6 +1053,7 @@ function sendAccountPayload(response, status, record, extraHeaders = {}) {
     purchases: queries.listPurchases.all(syncedRecord.id),
     transactions: queries.listWalletTransactions.all(syncedRecord.id).map(toPublicWalletTransaction),
     totalIncome: getTotalIncome(syncedRecord.id),
+    incomeHistory: queries.listIncomeHistory.all(syncedRecord.id),
     referrals: listReferralTeam(syncedRecord.id),
     verification: toPublicVerification(queries.findLatestVerification.get(syncedRecord.id)),
   }, extraHeaders)
@@ -1049,10 +1061,6 @@ function sendAccountPayload(response, status, record, extraHeaders = {}) {
 
 function getTotalIncome(userId) {
   return Number(queries.sumIncomeTransactions.get(userId)?.totalIncome) || 0
-}
-
-function walletAddress(record, crypto, network) {
-  return rechargeAddresses[crypto]?.[network] || `SEZ-${record.walletId}-${crypto}-${network}`
 }
 
 function runInTransaction(callback) {

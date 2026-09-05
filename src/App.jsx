@@ -1,26 +1,30 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import './App.css'
+import './design.css'
+import AuthScreen from './components/auth-screen.jsx'
+import IncomeChart from './components/income-chart.jsx'
+import VerificationReview from './components/verification-review.jsx'
 import { BottomNav, SideNav } from './components/navbar.jsx'
 import { IconButton, PrimaryButton, SegmentButton } from './components/button.jsx'
-import { defaultLanguageId, formatLanguageChangeNotice, getLanguageOption, languageOptions, observePageTranslations } from './i18n.js'
+import { defaultLanguageId, getLanguageOption, languageOptions } from './language-options.js'
 
 const navItems = [
   { id: 'home', label: 'Home', icon: 'home' },
   { id: 'invest', label: 'Invest', icon: 'grid' },
   { id: 'wallet', label: 'Wallet', icon: 'wallet' },
-  { id: 'referrals', label: 'Referral', icon: 'send' },
+  { id: 'referrals', label: 'Referrals', icon: 'send' },
   { id: 'support', label: 'Support', icon: 'support' },
   { id: 'profile', label: 'Profile', icon: 'user' },
 ]
 
 const pageMeta = {
   home: { eyebrow: 'Investor dashboard', title: 'Overview' },
-  invest: { eyebrow: 'Investment portfolio', title: 'Maining plans' },
+  invest: { eyebrow: 'Investment portfolio', title: 'Mining plans' },
   wallet: { eyebrow: 'Account funds', title: 'Wallet' },
   referrals: { eyebrow: 'Member network', title: 'Referrals' },
   support: { eyebrow: 'Customer help', title: 'Support' },
   profile: { eyebrow: 'Account management', title: 'Profile' },
-  mainingDetails: { eyebrow: 'Maining details', title: 'Read more' },
+  mainingDetails: { eyebrow: 'Mining details', title: 'Read more' },
   recharge: { eyebrow: 'Account funds', title: 'Recharge' },
   withdraw: { eyebrow: 'Account funds', title: 'Withdraw' },
   security: { eyebrow: 'Account protection', title: 'Security' },
@@ -33,13 +37,13 @@ const pageMeta = {
 const actionItems = [
   { label: 'Recharge', icon: 'plus', tone: 'blue', view: 'recharge' },
   { label: 'Withdraw', icon: 'arrow-up', tone: 'violet', view: 'withdraw' },
-  { label: 'Sign Out', icon: 'logout', tone: 'gold', action: 'logout' },
+  { label: 'Explore plans', icon: 'grid', tone: 'gold', view: 'invest' },
 ]
 
 const cryptoOptions = [
-  { id: 'USDT', name: 'Tether', quantity: (price) => `${price.toLocaleString('en-US', { minimumFractionDigits: 2 })} USDT`, tone: 'teal' },
-  { id: 'BTC', name: 'Bitcoin', quantity: (price) => `${(price / 64000).toFixed(6)} BTC`, tone: 'gold' },
-  { id: 'ETH', name: 'Ethereum', quantity: (price) => `${(price / 3400).toFixed(4)} ETH`, tone: 'violet' },
+  { id: 'USDT', name: 'Tether', tone: 'teal' },
+  { id: 'BTC', name: 'Bitcoin', tone: 'gold' },
+  { id: 'ETH', name: 'Ethereum', tone: 'violet' },
 ]
 const rechargeAddresses = {
   USDT: {
@@ -75,10 +79,10 @@ const tierPlans = [
 ]
 const tierIds = ['starter', 'premium', 'elite', 'royal']
 const tierColors = [
-  ['#4b91ff', 'rgba(36, 113, 255, .32)'],
-  ['#9b70ff', 'rgba(125, 75, 255, .30)'],
-  ['#f0b91a', 'rgba(240, 185, 26, .26)'],
-  ['#1fddb0', 'rgba(24, 203, 157, .26)'],
+  ['#c4dc96', 'rgba(196, 220, 150, .12)'],
+  ['#bca9e4', 'rgba(188, 169, 228, .12)'],
+  ['#e8bd9c', 'rgba(232, 189, 156, .12)'],
+  ['#a7d9c2', 'rgba(167, 217, 194, .12)'],
 ]
 
 const maxTierDailyIncome = Math.max(...tierPlans.map((plan) => plan.dailyIncome))
@@ -88,8 +92,8 @@ const tiers = tierPlans.map(({ amount: price, dailyIncome }, index) => {
 
   return {
     id: tierIds[index] || `vip-${index + 1}`,
-    level: `Maining ${index + 1}`,
-    title: `Maining Plan ${index + 1}`,
+    level: `Mining ${index + 1}`,
+    title: `Mining Plan ${index + 1}`,
     price,
     dailyIncome,
     investment: formatCompactMoney(price),
@@ -155,7 +159,7 @@ const supportTutorials = [
     label: 'Verification',
     title: 'Verification Tutorial',
     icon: 'upload',
-    intro: 'Verification unlocks recharge, withdrawal, and Maining plan purchase actions.',
+    intro: 'Verification unlocks recharge, withdrawal, and Mining plan purchase actions.',
     steps: [
       'Choose ID card or passport as the document type.',
       'Upload one document file and one clear face photo.',
@@ -164,10 +168,10 @@ const supportTutorials = [
   },
   {
     id: 'maining',
-    label: 'Maining Plans',
-    title: 'Maining Plans Tutorial',
+    label: 'Mining Plans',
+    title: 'Mining Plans Tutorial',
     icon: 'grid',
-    intro: 'Maining plans use wallet balance to purchase a selected mining package.',
+    intro: 'Mining plans use wallet balance to purchase a selected mining package.',
     steps: [
       'Open Invest and filter plans by price range.',
       'Read plan details to review price, daily payout, projected profit, and payout timer.',
@@ -185,14 +189,16 @@ function CustomerApp() {
   const [activeView, setActiveView] = useState('home')
   const [tierFilter, setTierFilter] = useState('all')
   const [notice, setNotice] = useState('')
+  const [purchasePending, setPurchasePending] = useState(false)
   const [checkoutTier, setCheckoutTier] = useState(null)
-  const [mainingTier, setMainingTier] = useState(null)
-  const [mainingBackView, setMainingBackView] = useState('invest')
+  const [mainingTier, setMiningTier] = useState(null)
+  const [mainingBackView, setMiningBackView] = useState('invest')
   const [selectedCrypto, setSelectedCrypto] = useState('USDT')
   const [purchases, setPurchases] = useState([])
   const [wallet, setWallet] = useState(emptyWallet)
   const [transactions, setTransactions] = useState([])
   const [totalIncome, setTotalIncome] = useState(0)
+  const [incomeHistory, setIncomeHistory] = useState(null)
   const [referrals, setReferrals] = useState([])
   const [verification, setVerification] = useState(null)
   const [user, setUser] = useState(null)
@@ -212,6 +218,7 @@ function CustomerApp() {
 
   const applyAccountPayload = useCallback((payload) => {
     const normalizedTransactions = (payload.transactions || []).map(toClientTransaction)
+    setIncomeHistory(Array.isArray(payload.incomeHistory) ? payload.incomeHistory : null)
     setUser(payload.user)
     setWallet(toClientWallet(payload.wallet))
     setPurchases((payload.purchases || []).map(toClientPurchase))
@@ -285,8 +292,12 @@ function CustomerApp() {
   }, [language])
 
   useEffect(() => {
-    const root = document.getElementById('root')
-    return observePageTranslations(root, language)
+    let active = true
+    let stop
+    import('./i18n.js').then(({ observePageTranslations }) => {
+      if (active) stop = observePageTranslations(document.getElementById('root'), language)
+    }).catch(() => { /* Keep the original English interface available if translation loading fails. */ })
+    return () => { active = false; stop?.() }
   }, [language])
 
   const filteredTiers = useMemo(() => {
@@ -335,15 +346,27 @@ function CustomerApp() {
     return [...transactionActivities, ...purchaseActivities]
   }, [purchases, transactions])
 
+  useEffect(() => {
+    if (!notice) return
+    const timeout = window.setTimeout(() => setNotice(''), 5000)
+    return () => window.clearTimeout(timeout)
+  }, [notice])
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' })
+    const title = checkoutTier ? 'Checkout' : pageMeta[activeView]?.title || 'Overview'
+    document.title = `${title} · SEZ`
+  }, [activeView, checkoutTier])
+
   function showNotice(message) {
     setNotice(message)
-    window.setTimeout(() => setNotice(''), 2400)
+
   }
 
   function requireVerifiedAccount() {
     if (user?.verified) return true
     showNotice(verificationRequiredMessage)
-    setMainingTier(null)
+    setMiningTier(null)
     setActiveView('verification')
     return false
   }
@@ -351,30 +374,30 @@ function CustomerApp() {
   function startCheckout(tier) {
     if (!requireVerifiedAccount()) return
     setSelectedCrypto('USDT')
-    setMainingTier(null)
-    setMainingBackView('invest')
+    setMiningTier(null)
+    setMiningBackView('invest')
     setActiveView('invest')
     setCheckoutTier(tier)
   }
 
-  function showMainingDetails(tier, backView = 'invest') {
+  function showMiningDetails(tier, backView = 'invest') {
     setCheckoutTier(null)
-    setMainingTier(tier)
-    setMainingBackView(backView)
+    setMiningTier(tier)
+    setMiningBackView(backView)
     setActiveView('mainingDetails')
   }
 
   function navigateTo(view) {
     if ((view === 'recharge' || view === 'withdraw') && !requireVerifiedAccount()) return
     setCheckoutTier(null)
-    setMainingTier(null)
-    setMainingBackView('invest')
+    setMiningTier(null)
+    setMiningBackView('invest')
     setActiveView(view)
   }
 
   function openSupportTutorial(topicId) {
     setCheckoutTier(null)
-    setMainingTier(null)
+    setMiningTier(null)
     setSupportTopic(supportTutorialMap[topicId] ? topicId : 'account')
     setActiveView('supportTutorial')
   }
@@ -382,11 +405,12 @@ function CustomerApp() {
   function updateLanguage(nextLanguage) {
     const option = getLanguageOption(nextLanguage)
     setLanguage(option.id)
-    showNotice(formatLanguageChangeNotice(option.id, option))
+    showNotice(`Language changed to ${option.label}.`)
   }
 
   async function confirmPurchase() {
-    if (!checkoutTier || purchases.some((purchase) => purchase.id === checkoutTier.id)) return
+    if (purchasePending || !checkoutTier || purchases.some((purchase) => purchase.id === checkoutTier.id)) return
+    setPurchasePending(true)
     try {
       const result = await requestApi('/api/purchases', { method: 'POST', body: { tierId: checkoutTier.id, crypto: selectedCrypto } })
       const normalizedTransactions = (result.transactions || []).map(toClientTransaction)
@@ -395,11 +419,13 @@ function CustomerApp() {
       setTransactions(normalizedTransactions)
       setTotalIncome(readPayloadTotalIncome(result, normalizedTransactions))
       setCheckoutTier(null)
-      setMainingTier(null)
+      setMiningTier(null)
       setActiveView('profile')
       showNotice(`${checkoutTier.title} was added to your profile.`)
     } catch (error) {
       showNotice(error.message)
+    } finally {
+      setPurchasePending(false)
     }
   }
 
@@ -413,7 +439,7 @@ function CustomerApp() {
     setUser(result.user)
     setVerification(result.verification || null)
     setActiveView('profile')
-    showNotice('Account verified. You can now add balance and buy Maining plans.')
+    showNotice(result.user?.verified ? 'Account verified.' : 'Documents submitted. Your verification is awaiting review.')
   }
 
   async function submitWithdrawal({ amount, crypto, address }) {
@@ -449,7 +475,7 @@ function CustomerApp() {
     applyAccountPayload(result)
     setActiveView(result.user?.verified ? 'home' : 'verification')
     setCheckoutTier(null)
-    setMainingTier(null)
+    setMiningTier(null)
     if (!result.user?.verified) showNotice(verificationRequiredMessage)
   }
 
@@ -464,11 +490,12 @@ function CustomerApp() {
     setWallet(emptyWallet)
     setTransactions([])
     setTotalIncome(0)
+    setIncomeHistory(null)
     setReferrals([])
     setVerification(null)
     setCheckoutTier(null)
-    setMainingTier(null)
-    setMainingBackView('invest')
+    setMiningTier(null)
+    setMiningBackView('invest')
     setActiveView('home')
     setAuthMode('login')
     setNotice('')
@@ -484,22 +511,24 @@ function CustomerApp() {
 
   return (
     <main className="app-shell">
-      <SideNav items={navItems} activeId={activeView} onSelect={navigateTo} onLogout={logout} supportUrl={telegramSupportUrl} />
+      <SideNav items={navItems} activeId={checkoutTier || activeView === 'mainingDetails' ? 'invest' : ['recharge', 'withdraw'].includes(activeView) ? 'wallet' : ['security', 'language', 'verification', 'profileSettings'].includes(activeView) ? 'profile' : activeView === 'supportTutorial' ? 'support' : activeView} onSelect={navigateTo} onLogout={logout} supportUrl={telegramSupportUrl} user={user} />
+      <a className="skip-link" href="#main-content">Skip to content</a>
       <div className="workspace">
         <header className="desktop-topbar">
-          <div><p className="eyebrow">{currentPage.eyebrow}</p><h2>{currentPage.title}</h2></div>
-          <div className="desktop-account"><button type="button" aria-label="Notifications" onClick={() => showNotice('You have no new notifications.')}><Icon name="bell" /></button><div className="desktop-avatar">{user.name.slice(0, 1).toUpperCase()}</div><span>{user.name}</span></div>
+          <div className="topbar-breadcrumb"><span>Workspace</span><span aria-hidden="true">/</span><h2>{currentPage.title}</h2></div>
+          <div className="desktop-account"><span className="topbar-account-status"><span className="status-dot" />Personal account</span><button type="button" aria-label="Notifications" onClick={() => showNotice('You have no new notifications.')}><Icon name="bell" /></button><button className="desktop-avatar profile-shortcut" type="button" aria-label="Open profile" onClick={() => navigateTo('profile')}>{user.name.slice(0, 1).toUpperCase()}</button></div>
         </header>
-        <div className="page-content">
-          {checkoutTier ? <CheckoutView tier={checkoutTier} crypto={selectedCrypto} wallet={wallet} onCrypto={setSelectedCrypto} onBack={() => setCheckoutTier(null)} onConfirm={confirmPurchase} /> : <>
-            {activeView === 'home' && <HomeView onAction={showNotice} onNavigate={navigateTo} onVerify={() => navigateTo('verification')} onHistory={() => navigateTo('wallet')} portfolio={portfolio} payoutTimer={payoutTimer} activities={activities} user={user} onLogout={logout} />}
-            {activeView === 'invest' && <InvestView filter={tierFilter} onFilter={setTierFilter} tiers={filteredTiers} portfolio={portfolio} payoutTimer={payoutTimer} purchases={purchases} now={clockNow} onReadMore={(tier) => showMainingDetails(tier, 'invest')} />}
-            {activeView === 'mainingDetails' && mainingTier && <MainingDetailsView tier={mainingPurchase || mainingTier} owned={Boolean(mainingPurchase)} payoutTimer={getPurchasePayoutTimer(mainingPurchase, clockNow)} onBack={() => navigateTo(mainingBackView)} onBuy={startCheckout} />}
+        <div className="page-content" id="main-content" tabIndex={-1}>
+          {(window.location.hostname.endsWith('.github.io') || window.location.protocol === 'file:') && <p className="demo-disclosure dashboard-demo">Browser demo · Data stays on this device. Payments and verification are simulated.</p>}
+          {checkoutTier ? <CheckoutView tier={checkoutTier} crypto={selectedCrypto} wallet={wallet} onCrypto={setSelectedCrypto} onBack={() => setCheckoutTier(null)} onConfirm={confirmPurchase} submitting={purchasePending} /> : <>
+            {activeView === 'home' && <HomeView incomeHistory={incomeHistory} verification={verification} transactions={transactions} onAction={showNotice} onNavigate={navigateTo} onVerify={() => navigateTo('verification')} onHistory={() => navigateTo('wallet')} portfolio={portfolio} payoutTimer={payoutTimer} activities={activities} user={user} onLogout={logout} />}
+            {activeView === 'invest' && <InvestView filter={tierFilter} onFilter={setTierFilter} tiers={filteredTiers} portfolio={portfolio} payoutTimer={payoutTimer} purchases={purchases} now={clockNow} onReadMore={(tier) => showMiningDetails(tier, 'invest')} />}
+            {activeView === 'mainingDetails' && mainingTier && <MiningDetailsView tier={mainingPurchase || mainingTier} owned={Boolean(mainingPurchase)} payoutTimer={getPurchasePayoutTimer(mainingPurchase, clockNow)} onBack={() => navigateTo(mainingBackView)} onBuy={startCheckout} />}
             {activeView === 'wallet' && <WalletView onRecharge={() => navigateTo('recharge')} onWithdraw={() => navigateTo('withdraw')} portfolio={portfolio} transactions={transactions} />}
             {activeView === 'referrals' && <ReferralView user={user} referrals={referrals} onCopy={copyInviteCode} onRefresh={refreshReferrals} />}
             {activeView === 'support' && <SupportView onTutorial={openSupportTutorial} />}
             {activeView === 'supportTutorial' && <SupportTutorialView topicId={supportTopic} onBack={() => setActiveView('support')} />}
-            {activeView === 'profile' && <ProfileView onAction={showNotice} onProfileSettings={() => navigateTo('profileSettings')} onLanguage={() => navigateTo('language')} onSecurity={() => navigateTo('security')} onReferrals={() => navigateTo('referrals')} onVerification={() => navigateTo('verification')} onReadMore={(tier) => showMainingDetails(tier, 'profile')} portfolio={portfolio} payoutTimer={payoutTimer} purchases={purchases} now={clockNow} user={user} verification={verification} language={selectedLanguage} onLogout={logout} />}
+            {activeView === 'profile' && <ProfileView onAction={showNotice} onProfileSettings={() => navigateTo('profileSettings')} onLanguage={() => navigateTo('language')} onSecurity={() => navigateTo('security')} onReferrals={() => navigateTo('referrals')} onVerification={() => navigateTo('verification')} onReadMore={(tier) => showMiningDetails(tier, 'profile')} portfolio={portfolio} payoutTimer={payoutTimer} purchases={purchases} now={clockNow} user={user} verification={verification} language={selectedLanguage} onLogout={logout} />}
             {activeView === 'recharge' && <RechargeView wallet={wallet} onBack={() => setActiveView('wallet')} />}
             {activeView === 'withdraw' && <WithdrawView onBack={() => setActiveView('wallet')} onWithdraw={submitWithdrawal} portfolio={portfolio} />}
             {activeView === 'profileSettings' && <ProfileSettingsView user={user} onBack={() => setActiveView('profile')} />}
@@ -512,47 +541,9 @@ function CustomerApp() {
 
       {notice && <div className="toast" role="status">{notice}</div>}
       <TelegramSupportButton />
-      <BottomNav items={navItems} activeId={activeView} onSelect={navigateTo} />
+      <BottomNav items={navItems} activeId={checkoutTier || activeView === 'mainingDetails' ? 'invest' : ['recharge', 'withdraw'].includes(activeView) ? 'wallet' : ['security', 'language', 'verification', 'profileSettings'].includes(activeView) ? 'profile' : activeView === 'supportTutorial' ? 'support' : activeView} onSelect={navigateTo} />
     </main>
   )
-}
-
-function AuthScreen({ mode, onModeChange, onAuthenticate }) {
-  const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [inviteCode, setInviteCode] = useState('')
-  const isRegister = mode === 'register'
-
-  const [error, setError] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-
-  async function submit(event) {
-    event.preventDefault()
-    setError('')
-    setSubmitting(true)
-    try {
-      await onAuthenticate({ mode, name, email, password, inviteCode })
-    } catch (submissionError) {
-      setError(submissionError.message)
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  function switchMode() {
-    setName('')
-    setEmail('')
-    setPassword('')
-    setInviteCode('')
-    onModeChange(isRegister ? 'login' : 'register')
-  }
-
-  return <main className="auth-shell">
-    <section className="auth-visual" aria-hidden="true"><div className="auth-brand">SEZ<span /></div><div className="auth-visual-copy"><p>Secure investing workspace</p><h1>Invest with a clearer view.</h1><div><strong>$0.00</strong><span>Start with a personal wallet and choose your first plan when ready.</span></div></div></section>
-    <section className="auth-main"><div className="auth-card"><div className="auth-mobile-brand">SEZ<span /></div><p className="eyebrow">Customer access</p><h1>{isRegister ? 'Create your account' : 'Welcome back'}</h1><p className="auth-subtitle">{isRegister ? 'Enter a member invite code to open your investor profile.' : 'Sign in to your investor workspace.'}</p><form onSubmit={submit}>{isRegister && <label>Full name<input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" required /></label>}<label>Email address<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label><label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={isRegister ? 'new-password' : 'current-password'} minLength="8" required /></label>{isRegister && <label>Invite code<input value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} autoComplete="off" required /></label>}{error && <p className="auth-error" role="alert">{error}</p>}<button className="auth-submit" type="submit" disabled={submitting}>{submitting ? 'Please wait...' : isRegister ? 'Create account' : 'Log in'}</button></form><p className="auth-switch">{isRegister ? 'Already have an account?' : 'New to SEZ?'} <button type="button" onClick={switchMode}>{isRegister ? 'Log in' : 'Create account'}</button></p></div></section>
-    <TelegramSupportButton />
-  </main>
 }
 
 function AdminApp() {
@@ -660,7 +651,7 @@ function AdminApp() {
     <div className="admin-grid">
       <section className="admin-panel admin-users-panel">
         <SectionHeader title="Customers" action={`${users.length} total`} />
-        <div className="admin-user-list">{users.length ? users.map((item) => <AdminUserRow key={item.id} user={item} />) : <EmptyAdminState label="No customers yet" />}</div>
+        <div className="admin-user-list">{users.length ? users.map((item) => <AdminUserRow key={item.id} user={item} accessKey={adminSessionKey} onReviewed={refreshServerSnapshot} canReview={snapshot.sourceType === 'server'} />) : <EmptyAdminState label="No customers yet" />}</div>
       </section>
 
       <section className="admin-panel admin-wallet-panel">
@@ -673,53 +664,30 @@ function AdminApp() {
   </main>
 }
 
-function VerificationBanner({ onVerify }) {
-  return <section className="verification-banner"><div><p className="eyebrow">Unverified account</p><h2>Upload your ID or passport and face photo.</h2></div><button type="button" onClick={onVerify}><Icon name="upload" />Verify</button></section>
+function VerificationBanner({ onVerify, pending = false }) {
+  return <section className="verification-banner"><span className="verification-banner-icon"><Icon name="shield" /></span><div><h2>{pending ? 'Your documents are under review' : 'Complete your account setup'}</h2><p>{pending ? 'Contact support for an update on your verification.' : 'Verify your identity to unlock wallet actions.'}</p></div><button type="button" onClick={onVerify}>{pending ? 'View status' : 'Verify account'}<Icon name="chevron" /></button></section>
 }
 
-function HomeView({ onAction, onNavigate, onVerify, onHistory, portfolio, payoutTimer, activities, user, onLogout }) {
-  const overviewItems = getOverviewItems(portfolio)
-
-  return (
-    <>
-      {!user.verified && <VerificationBanner onVerify={onVerify} />}
-      <div className="home-hero-grid">
-        <section className="balance-card">
-          <div className="balance-topline">
-            <div><p className="eyebrow">Good Morning</p><h1>{user.name}</h1></div>
-            <div className="avatar">{user.name.slice(0, 1).toUpperCase()}</div>
-          </div>
-          <p className="eyebrow balance-label">Total Balance</p>
-          <p className="balance-value">{formatMoney(portfolio.walletBalance)}</p>
-          <p className="growth"><Icon name="trend" /> 0% this month</p>
-          <PayoutTimer timer={payoutTimer} />
-          <div className="income-strip">
-            <div className="income-icon"><Icon name="check" /></div>
-            <div><p className="micro-label">My Income</p><strong>{formatMoney(portfolio.earnings)}</strong></div>
-            <div className="strip-rule" />
-            <div><p className="micro-label">Revenue</p><strong className="violet-text">{formatMoney(portfolio.earnings)}</strong></div>
-          </div>
-        </section>
-        <section className="quick-actions-panel" aria-label="Quick actions">
-          <p className="quick-actions-title">Quick actions</p>
-          <div className="action-grid">
-            {actionItems.map((item) => <IconButton key={item.label} label={item.label} icon={item.icon} tone={item.tone} onClick={() => item.action === 'logout' ? onLogout() : onNavigate(item.view)} />)}
-          </div>
-        </section>
-      </div>
-
-      <div className="home-data-grid">
-        <section className="overview-panel">
-          <SectionHeader title="Daily Overview" action="See all" onAction={() => onAction('Daily reporting is up to date.')} />
-          <div className="overview-row">{overviewItems.map((item) => <OverviewCard key={item.label} item={item} />)}</div>
-        </section>
-        <section className="activity-panel">
-          <SectionHeader title="Recent Activity" action="History" onAction={onHistory} />
-          <ActivityList items={activities} emptyMessage="No transactions yet" />
-        </section>
-      </div>
-    </>
-  )
+function HomeView({ onNavigate, onVerify, onHistory, portfolio, payoutTimer, activities, transactions, incomeHistory, verification, user }) {
+  const hour = new Date().getHours()
+  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
+  const stats = [
+    { label: 'Total Income', value: formatMoney(portfolio.totalIncome), note: 'Completed account income', icon: 'trend', tone: 'lime' },
+    { label: 'Daily Income', value: formatMoney(portfolio.dailyIncome), note: 'Projected from active plans', icon: 'clock', tone: 'lilac' },
+    { label: 'Active Plans', value: String(portfolio.activeTiers).padStart(2, '0'), note: `${formatMoney(portfolio.totalInvested)} invested`, icon: 'grid', tone: 'peach' },
+  ]
+  return <>
+    <div className="dashboard-welcome"><div><p className="eyebrow">YOUR PERSONAL OVERVIEW</p><h1>{greeting}, <span>{user.name.split(' ')[0]}<span className="welcome-dot">.</span></span></h1><p>Here’s what’s happening with your account today.</p></div><span className="dashboard-date"><Icon name="calendar" />{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span></div>
+    {!user.verified && <VerificationBanner onVerify={onVerify} pending={verification?.status === 'Pending'} />}
+    <div className="home-hero-grid">
+      <section className="balance-card"><div className="balance-topline"><p className="eyebrow">Total Balance</p><span className="balance-currency">USD</span></div><p className="balance-value">{formatMoney(portfolio.walletBalance)}</p><p className="balance-description"><span className="status-dot" />Available in your wallet</p><div className="balance-bottom"><span><Icon name="wallet" />{portfolio.walletId || 'Personal wallet'}</span><button type="button" onClick={onHistory}>View wallet <Icon name="chevron" /></button></div></section>
+      <section className="quick-actions-panel" aria-label="Quick actions"><div className="section-heading"><h2>Quick actions</h2><span className="section-kicker">LET’S MAKE A MOVE</span></div><div className="action-grid">{actionItems.map((item) => <IconButton key={item.label} label={item.label} icon={item.icon} tone={item.tone} onClick={() => onNavigate(item.view)} />)}</div><div className="quick-actions-note"><Icon name="shield" /><span>All your wallet actions in one place.</span></div></section>
+    </div>
+    <section className="dashboard-stat-grid" aria-label="Account summary">{stats.map((stat) => <article className="dashboard-stat" key={stat.label}><div className="stat-topline"><p>{stat.label}</p><span className={`stat-icon ${stat.tone}`}><Icon name={stat.icon} /></span></div><strong>{stat.value}</strong><span>{stat.note}</span></article>)}</section>
+    <div className="home-data-grid"><IncomeChart transactions={transactions} history={incomeHistory} /><section className="activity-panel"><SectionHeader title="Recent Activity" action="View all" onAction={onHistory} /><ActivityList items={activities.slice(0, 5)} emptyMessage="No transactions yet" />{!activities.length && <p className="activity-empty-note">Your deposits, withdrawals, and earnings will appear here.</p>}</section></div>
+    {payoutTimer && <PayoutTimer timer={payoutTimer} />}
+    <footer className="dashboard-footer"><span>SEZ · Your investor workspace</span><a href={telegramSupportUrl} target="_blank" rel="noreferrer">Need a hand? Contact support <span aria-hidden="true">↗</span></a></footer>
+  </>
 }
 
 function InvestView({ filter, onFilter, tiers: tierItems, portfolio, payoutTimer, purchases, now, onReadMore }) {
@@ -727,13 +695,13 @@ function InvestView({ filter, onFilter, tiers: tierItems, portfolio, payoutTimer
     <>
       <section className="investment-summary">
         <div className="summary-topline">
-          <div><p className="eyebrow">Investment</p><h1>Maining Devices</h1></div>
+          <div><p className="eyebrow">Investment</p><h1>Mining plans</h1></div>
           <div className="active-tier"><span>Active</span><strong>{`${portfolio.activeTiers} Plans`}</strong></div>
         </div>
         <div className="summary-metrics"><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label="Total Income" value={formatMoney(portfolio.totalIncome)} green /><Metric label="1 Month Result" value={formatMoney(portfolio.oneMonthResult)} /><Metric label="Next Payout" value={payoutTimer ? formatCountdown(payoutTimer.remainingMs) : 'No active plan'} /></div>
       </section>
 
-      <div className="filter-row" role="tablist" aria-label="Maining plans">
+      <div className="filter-row" role="tablist" aria-label="Mining plans">
         {tierFilters.map((item) => <SegmentButton key={item.id} label={item.label} active={filter === item.id} onClick={() => onFilter(item.id)} />)}
       </div>
       <section className="tier-list">{tierItems.map((tier) => {
@@ -767,14 +735,14 @@ function WalletView({ onRecharge, onWithdraw, portfolio, transactions }) {
 }
 
 function ProfileView({ onAction, onProfileSettings, onLanguage, onSecurity, onReferrals, onVerification, onReadMore, portfolio, purchases, now, user, verification, language, onLogout }) {
-  const verificationLabel = user.verified ? 'Verified' : 'Unverified'
-  const verificationDate = verification?.createdAt ? `Verified ${formatShortDate(verification.createdAt)}` : 'ID/passport and face photo required'
+  const verificationLabel = user.verified ? 'Verified' : verification?.status === 'Pending' ? 'Pending review' : verification?.status === 'Rejected' ? 'New documents needed' : 'Unverified'
+  const verificationDate = verification?.createdAt ? `${verificationLabel} · ${formatShortDate(verification.createdAt)}` : 'ID/passport and face photo required'
 
   return (
     <>
       <section className="profile-hero"><div className="large-avatar">{user.name.slice(0, 1).toUpperCase()}</div><div><p className="eyebrow">Member Account</p><h1>{user.name}</h1><p>{user.email}</p><span className={`verification-pill${user.verified ? ' verified' : ''}`}>{verificationLabel}</span></div></section>
       <section className="profile-grid"><Metric label="Wallet" value={formatMoney(portfolio.walletBalance)} /><Metric label="Active Plans" value={String(portfolio.activeTiers)} /><Metric label="Daily Income" value={formatMoney(portfolio.dailyIncome)} green /><Metric label="Total Income" value={formatMoney(portfolio.totalIncome)} green /></section>
-      {!user.verified && <VerificationBanner onVerify={onVerification} />}
+      {!user.verified && <VerificationBanner onVerify={onVerification} pending={verification?.status === 'Pending'} />}
       <section className="purchased-panel"><SectionHeader title="Purchased Plans" action={`${portfolio.activeTiers} active`} onAction={() => onAction('Your purchased plans are shown below.')} /><PurchasedTiers purchases={purchases} now={now} onReadMore={onReadMore} /></section>
       <section className="settings-list">
         <button type="button" onClick={onVerification}><span><Icon name="upload" />Verification</span><small>{verificationDate}</small><Icon name="chevron" /></button>
@@ -790,12 +758,17 @@ function ProfileView({ onAction, onProfileSettings, onLanguage, onSecurity, onRe
 
 function ReferralView({ user, referrals, onCopy, onRefresh }) {
   const [refreshing, setRefreshing] = useState(false)
+  const [refreshError, setRefreshError] = useState('')
   const teamCounts = referralTeams.map((team) => ({ ...team, count: referrals.filter((referral) => Number(referral.level || 1) === team.level).length }))
 
   async function refresh() {
+    if (refreshing) return
     setRefreshing(true)
+    setRefreshError('')
     try {
       await onRefresh()
+    } catch (error) {
+      setRefreshError(error.message || 'Unable to refresh referrals. Try again.')
     } finally {
       setRefreshing(false)
     }
@@ -820,7 +793,7 @@ function ReferralView({ user, referrals, onCopy, onRefresh }) {
       </section>
       <section className="purchased-panel referral-panel">
         <SectionHeader title="Referral Tree" action={refreshing ? 'Refreshing...' : 'Refresh'} onAction={refresh} />
-        <ReferralList referrals={referrals} rootUser={user} />
+        {refreshError && <p className="auth-error" role="alert">{refreshError}</p>}<ReferralList referrals={referrals} rootUser={user} />
       </section>
     </>
   )
@@ -881,7 +854,7 @@ function SupportView({ onTutorial }) {
         <div>
           <p className="eyebrow">Support center</p>
           <h1>Customer Support</h1>
-          <p>Contact support for account, wallet, verification, and Maining plan help.</p>
+          <p>Contact support for account, wallet, verification, and Mining plan help.</p>
         </div>
         <div className="support-actions">
           <a href={telegramSupportUrl} target="_blank" rel="noreferrer"><Icon name="send" />Support</a>
@@ -918,7 +891,7 @@ function SupportTutorialView({ topicId, onBack }) {
       <section className="info-panel support-contact-panel">
         <p className="eyebrow">Customer help</p>
         <h2>Need support?</h2>
-        <div className="verification-status verified"><Icon name="send" /><span>Contact support if you need account changes, wallet help, verification help, or Maining plan help.</span></div>
+        <div className="verification-status verified"><Icon name="send" /><span>Contact support if you need account changes, wallet help, verification help, or Mining plan help.</span></div>
         <a className="primary-button" href={telegramSupportUrl} target="_blank" rel="noreferrer"><Icon name="send" />Contact Support</a>
         <a className="primary-button secondary" href={telegramGroupUrl} target="_blank" rel="noreferrer"><Icon name="users" />Group Chat</a>
       </section>
@@ -945,25 +918,25 @@ function TierCard({ tier, owned, now, onReadMore }) {
   )
 }
 
-function MainingDetailsView({ tier, owned, payoutTimer, onBack, onBuy }) {
+function MiningDetailsView({ tier, owned, payoutTimer, onBack, onBuy }) {
   const projection = getTierProjection(tier.price, tier.monthlyRate)
 
   return <section className="detail-page maining-page" style={{ '--accent': tier.color, '--accent-shadow': tier.shadow }}>
-    <button className="subpage-back" type="button" onClick={onBack}><Icon name="arrow-left" />Back to maining</button>
+    <button className="subpage-back" type="button" onClick={onBack}><Icon name="arrow-left" />Back to mining</button>
     <div className="detail-grid">
       <section className="maining-panel">
-        <p className="eyebrow">Maining plan</p>
+        <p className="eyebrow">Mining plan</p>
         <span className="vip-pill"><span />{tier.level}</span>
         <h1>{tier.title}</h1>
-        <p>Maining is a customer plan that connects your account balance to a selected mining package. The dashboard tracks the plan price, daily payout, weekly profit, and 1 month result.</p>
+        <p>Mining is a customer plan that connects your account balance to a selected mining package. The dashboard tracks the plan price, daily payout, weekly profit, and 1 month result.</p>
         <div className="maining-metrics"><Metric label="Plan Price" value={formatMoney(tier.price)} /><Metric label="Daily Payout" value={formatMoney(projection.dailyIncome)} green /><Metric label="Weekly Profit" value={formatMoney(projection.weeklyProfit)} /><Metric label="1 Month Result" value={formatMoney(projection.monthResult)} /></div>
         {payoutTimer && <PayoutTimer timer={payoutTimer} />}
         <PrimaryButton label={owned ? 'Purchased' : 'Buy Now'} icon="check" disabled={owned} onClick={() => onBuy(tier)} />
       </section>
       <section className="info-panel maining-info">
         <p className="eyebrow">How it works</p>
-        <h2>What Maining uses</h2>
-        <div className="maining-copy"><h3>Mining equipment</h3><p>Maining plans are presented as access to managed mining devices that produce daily account income after the payout time.</p></div>
+        <h2>What Mining uses</h2>
+        <div className="maining-copy"><h3>Mining equipment</h3><p>Mining plans are presented as access to managed mining devices that produce daily account income after the payout time.</p></div>
         <div className="maining-copy"><h3>Power and network pools</h3><p>The operation uses electricity capacity, network mining pools, and wallet settlement to calculate the daily payout shown on each plan.</p></div>
         <div className="maining-copy"><h3>Wallet balance</h3><p>After purchase, the plan income is credited to the customer wallet every 24 hours when the account is active.</p></div>
       </section>
@@ -975,10 +948,6 @@ function PayoutTimer({ timer }) {
   if (!timer) return null
 
   return <div className="payout-timer"><span><Icon name="clock" />24H Timer</span><strong>{formatCountdown(timer.remainingMs)}</strong><small>Next payout</small></div>
-}
-
-function OverviewCard({ item }) {
-  return <article className="overview-card" style={{ '--overview-color': item.color }}><p className="micro-label">{item.label}</p><strong>{item.value}</strong><span>{item.note}</span><div className="bar-chart" aria-hidden="true">{item.bars.map((height, index) => <i key={`${item.label}-${index}`} style={{ height }} />)}</div></article>
 }
 
 function ActivityList({ items, emptyMessage }) {
@@ -995,21 +964,26 @@ function PurchasedTiers({ purchases, now, onReadMore }) {
   })}</div>
 }
 
-function CheckoutView({ tier, crypto, wallet, onCrypto, onBack, onConfirm }) {
-  const selectedOption = cryptoOptions.find((option) => option.id === crypto)
+function CheckoutView({ tier, wallet, onBack, onConfirm, submitting }) {
   return <section className="checkout-page" style={{ '--accent': tier.color, '--accent-shadow': tier.shadow }}>
     <button className="checkout-back" type="button" onClick={onBack}><Icon name="arrow-left" />Back to plans</button>
     <div className="checkout-grid">
-      <div className="checkout-intro"><p className="eyebrow">Customer purchase</p><h1>Buy {tier.title}</h1><p>Choose a cryptocurrency to complete your Maining purchase.</p><div className="checkout-product"><span className="vip-pill"><span />{tier.level}</span><h2>{tier.title}</h2><strong>{formatMoney(tier.price)}</strong><div className="risk-row"><span className="micro-label">Daily Payout</span><strong>{tier.risk}</strong></div><div className="risk-track"><span style={{ width: `${tier.riskValue}%` }} /></div></div></div>
-      <div className="checkout-payment"><p className="eyebrow">Wallet payment</p><h2>Select cryptocurrency</h2><div className="crypto-options">{cryptoOptions.map((option) => <button key={option.id} className={crypto === option.id ? 'active' : ''} type="button" onClick={() => onCrypto(option.id)}><span className={`crypto-mark ${option.tone}`}>{option.id.slice(0, 1)}</span><span><strong>{option.id}</strong><small>{option.name}</small></span><Icon name="check" /></button>)}</div><div className="payment-total"><span>Amount due</span><strong>{selectedOption.quantity(tier.price)}</strong><small>{formatMoney(tier.price)} from wallet {wallet.id}</small></div><PrimaryButton label="Confirm Wallet Payment" icon="check" onClick={onConfirm} /><p className="payment-note">Your wallet balance must cover this plan before purchase.</p></div>
+      <div className="checkout-intro"><p className="eyebrow">Customer purchase</p><h1>Buy {tier.title}</h1><p>Review the plan and payment amount before confirming.</p><div className="checkout-product"><span className="vip-pill"><span />{tier.level}</span><h2>{tier.title}</h2><strong>{formatMoney(tier.price)}</strong><div className="risk-row"><span className="micro-label">Daily Payout</span><strong>{tier.risk}</strong></div><div className="risk-track"><span style={{ width: `${tier.riskValue}%` }} /></div></div></div>
+      <div className="checkout-payment"><p className="eyebrow">Wallet payment</p><h2>Review your purchase</h2><div className="checkout-wallet-summary"><Icon name="wallet" /><div><strong>Personal wallet</strong><span>{wallet.id}</span></div><strong>{formatMoney(wallet.balance)}</strong></div><div className="payment-total"><span>Amount due</span><strong>{formatMoney(tier.price)}</strong><small>Paid from your available wallet balance</small></div><PrimaryButton label={submitting ? 'Processing payment...' : 'Confirm Wallet Payment'} icon="check" onClick={onConfirm} disabled={submitting || wallet.balance < tier.price} /><p className="payment-note">{wallet.balance < tier.price ? 'Insufficient balance. Add funds to your wallet before purchasing this plan.' : 'The plan price will be deducted from your wallet once.'}</p></div>
     </div>
   </section>
 }
 
-function RechargeView({ wallet, onBack }) {
+function RechargeView({ onBack }) {
   const [crypto, setCrypto] = useState('USDT')
   const [network, setNetwork] = useState('TRC20')
-  const walletAddress = getRechargeAddress(wallet, crypto, network)
+  const walletAddress = getRechargeAddress(crypto, network)
+  const [copied, setCopied] = useState(false)
+  const [copyError, setCopyError] = useState('')
+  async function copyAddress() {
+    try { await navigator.clipboard.writeText(walletAddress); setCopied(true); setCopyError('') }
+    catch { setCopyError('Select and copy the wallet address above.') }
+  }
 
   return <section className="detail-page recharge-page">
     <button className="subpage-back" type="button" onClick={onBack}><Icon name="arrow-left" />Back to wallet</button>
@@ -1017,9 +991,12 @@ function RechargeView({ wallet, onBack }) {
       <section className="form-panel recharge-panel">
         <p className="eyebrow">Recharge account</p>
         <h1>Add balance</h1>
-        <label>Currency<select value={crypto} onChange={(event) => setCrypto(event.target.value)}>{cryptoOptions.map((option) => <option key={option.id} value={option.id}>{option.id} - {option.name}</option>)}</select></label>
-        <label>Network<select value={network} onChange={(event) => setNetwork(event.target.value)}><option>TRC20</option><option>ERC20</option><option>BEP20</option></select></label>
+        <label>Currency<select value={crypto} onChange={(event) => setCrypto(event.target.value)}>{cryptoOptions.filter((option) => rechargeAddresses[option.id]).map((option) => <option key={option.id} value={option.id}>{option.id} - {option.name}</option>)}</select></label>
+        <label>Network<select value={network} onChange={(event) => setNetwork(event.target.value)}>{Object.keys(rechargeAddresses[crypto] || {}).map((value) => <option key={value}>{value}</option>)}</select></label>
         <label>Crypto wallet address<input className="wallet-address-input" value={walletAddress} readOnly onFocus={(event) => event.target.select()} /></label>
+        <button className="primary-button" type="button" onClick={copyAddress} disabled={!walletAddress}><Icon name="copy" />{copied ? 'Address copied' : 'Copy wallet address'}</button>
+        <p className="recharge-instruction">Only send USDT using the TRC20 network to this address. Contact support for deposit confirmation.</p>
+        {copyError && <p className="auth-error" role="alert">{copyError}</p>}
       </section>
     </div>
   </section>
@@ -1056,7 +1033,7 @@ function WithdrawView({ onBack, onWithdraw, portfolio }) {
       <form className="form-panel" onSubmit={submit}>
         <p className="eyebrow">Withdraw funds</p>
         <h1>Send balance</h1>
-        <label>Amount<input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.00" required /></label>
+        <label>Amount<input type="number" min="0.01" step="0.01" max={portfolio.walletBalance} inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.00" required /></label>
         <label>Currency<select value={crypto} onChange={(event) => setCrypto(event.target.value)}>{cryptoOptions.map((option) => <option key={option.id} value={option.id}>{option.id} - {option.name}</option>)}</select></label>
         <label>Wallet address<input value={address} onChange={(event) => setAddress(event.target.value)} placeholder="Paste wallet address" required /></label>
         {error && <p className="auth-error" role="alert">{error}</p>}
@@ -1111,7 +1088,6 @@ function LanguageView({ language, onBack, onChange }) {
 function SecurityView({ user, onBack, onAction, onPasswordChange, onVerification }) {
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
-  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false)
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -1144,15 +1120,17 @@ function SecurityView({ user, onBack, onAction, onPasswordChange, onVerification
       <section className="info-panel security-panel">
         <p className="eyebrow">Account protection</p>
         <h2>{user.email}</h2>
-        <button className={`toggle-row${user.verified ? ' active' : ''}`} type="button" onClick={() => user.verified ? onAction('Your account is verified for recharge and Maining purchases.') : onVerification()}><span><Icon name={user.verified ? 'check' : 'upload'} />Customer verification</span><strong>{user.verified ? 'Verified' : 'Unverified'}</strong></button>
-        <button className={`toggle-row${twoFactorEnabled ? ' active' : ''}`} type="button" onClick={() => setTwoFactorEnabled((enabled) => !enabled)}><span><Icon name="shield" />Two-factor login</span><strong>{twoFactorEnabled ? 'On' : 'Off'}</strong></button>
-        <button className="toggle-row" type="button" onClick={() => onAction('Withdrawal confirmation is required for every request.')}><span><Icon name="check" />Withdrawal confirmation</span><strong>On</strong></button>
+        <button className={`toggle-row${user.verified ? ' active' : ''}`} type="button" onClick={() => user.verified ? onAction('Your account is verified for recharge and Mining purchases.') : onVerification()}><span><Icon name={user.verified ? 'check' : 'upload'} />Customer verification</span><strong>{user.verified ? 'Verified' : 'Unverified'}</strong></button>
+        <div className="toggle-row"><span><Icon name="shield" />Two-factor login</span><strong>Not available</strong></div>
+        <div className="locked-profile-note"><Icon name="shield" /><span>Use a unique password. Two-factor authentication is not currently supported.</span></div>
       </section>
     </div>
   </section>
 }
 
 function VerificationView({ user, verification, onBack, onVerify }) {
+  const pending = verification?.status === 'Pending'
+  const locked = user.verified || pending
   const [documentType, setDocumentType] = useState('id')
   const [documentFile, setDocumentFile] = useState(null)
   const [faceFile, setFaceFile] = useState(null)
@@ -1179,25 +1157,26 @@ function VerificationView({ user, verification, onBack, onVerify }) {
     <div className="detail-grid">
       <form className="form-panel verification-form" onSubmit={submit}>
         <p className="eyebrow">Customer verification</p>
-        <h1>{user.verified ? 'Verified account' : 'Upload documents'}</h1>
-        <label>Document type<select value={documentType} onChange={(event) => setDocumentType(event.target.value)} disabled={user.verified}><option value="id">ID card</option><option value="passport">Passport</option></select></label>
-        <label>ID or passport<input type="file" accept=".pdf,image/jpeg,image/png,image/webp" onChange={(event) => setDocumentFile(event.target.files?.[0] || null)} disabled={user.verified} required={!user.verified} /></label>
-        <label>Face photo<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setFaceFile(event.target.files?.[0] || null)} disabled={user.verified} required={!user.verified} /></label>
+        <h1>{user.verified ? 'Verified account' : pending ? 'Documents submitted' : 'Upload documents'}</h1>
+        <label>Document type<select value={documentType} onChange={(event) => setDocumentType(event.target.value)} disabled={locked}><option value="id">ID card</option><option value="passport">Passport</option></select></label>
+        <label>ID or passport<input type="file" accept=".pdf,image/jpeg,image/png,image/webp" onChange={(event) => setDocumentFile(event.target.files?.[0] || null)} disabled={locked} required={!locked} /></label>
+        <label>Face photo<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setFaceFile(event.target.files?.[0] || null)} disabled={locked} required={!locked} /></label>
         {error && <p className="auth-error" role="alert">{error}</p>}
-        <button className="primary-button" type="submit" disabled={submitting || user.verified}>{submitting ? 'Uploading...' : user.verified ? 'Already Verified' : 'Submit Verification'}</button>
+        <button className="primary-button" type="submit" disabled={submitting || locked}>{submitting ? 'Uploading...' : user.verified ? 'Already Verified' : pending ? 'Awaiting review' : 'Submit Verification'}</button>
       </form>
       <section className="info-panel verification-panel">
         <p className="eyebrow">Verification status</p>
-        <h2>{user.verified ? 'Verified' : 'Unverified'}</h2>
-        <div className={`verification-status${user.verified ? ' verified' : ''}`}><Icon name={user.verified ? 'check' : 'upload'} /><span>{user.verified ? 'Your wallet is enabled for recharge, withdrawals, and Maining purchases.' : 'Upload one ID or passport document and one face picture to unlock wallet actions.'}</span></div>
+        <h2>{user.verified ? 'Verified' : pending ? 'Pending review' : 'Unverified'}</h2>
+        <div className={`verification-status${user.verified ? ' verified' : ''}`}><Icon name={user.verified ? 'check' : 'upload'} /><span>{user.verified ? 'Your wallet is enabled for recharge, withdrawals, and Mining purchases.' : pending ? 'Your documents are awaiting review. Contact support for an update.' : 'Submit your documents for review. Wallet actions become available after approval.'}</span></div>
         <div className="result-strip"><Metric label="Document" value={verification?.documentName || 'Required'} /><Metric label="Face Photo" value={verification?.faceName || 'Required'} /></div>
+        {pending && <a className="primary-button secondary" href={telegramSupportUrl} target="_blank" rel="noreferrer">Contact Support</a>}
       </section>
     </div>
   </section>
 }
 
 function SectionHeader({ title, action, onAction }) {
-  return <div className="section-heading"><h2>{title}</h2>{action && <button type="button" onClick={onAction}>{action}</button>}</div>
+  return <div className="section-heading"><h2>{title}</h2>{action && (onAction ? <button type="button" onClick={onAction}>{action}<Icon name="chevron" /></button> : <span className="section-kicker">{action}</span>)}</div>
 }
 
 function Metric({ label, value, green = false }) {
@@ -1212,7 +1191,7 @@ function EmptyAdminState({ label }) {
   return <div className="admin-empty"><Icon name="grid" /><span>{label}</span></div>
 }
 
-function AdminUserRow({ user }) {
+function AdminUserRow({ user, accessKey, onReviewed, canReview }) {
   const registeredBy = user.referredByName || user.registeredWithCode || (user.referredByUserId ? `User #${user.referredByUserId}` : 'Direct')
   const verificationStatus = user.verificationStatus || (user.verified ? 'Verified' : 'Required')
 
@@ -1239,6 +1218,7 @@ function AdminUserRow({ user }) {
       <span><strong>Last Login IP</strong><small>{user.lastLoginIp || 'Not captured'}</small></span>
       <span><strong>Last Login</strong><small>{formatShortDateTime(user.lastLoginAt)}</small></span>
     </div>
+    {canReview && verificationStatus === 'Pending' && <VerificationReview user={user} accessKey={accessKey} onReviewed={onReviewed} />}
     <div className="admin-user-state"><strong className={user.verified ? 'verified' : ''}>{user.verified ? 'Verified' : 'Unverified'}</strong><small>{formatShortDate(user.lastActivity || user.createdAt)}</small></div>
   </article>
 }
@@ -1253,14 +1233,6 @@ function AdminTransactionRow({ transaction }) {
     <div><h3>{formatAdminType(transaction.type)}</h3><p>{transaction.userName || 'Customer'} - {details}</p><small>{memo}</small></div>
     <strong className={isCredit ? 'positive' : 'negative'}>{isCredit ? '+' : '-'}{formatMoney(transaction.amount)}</strong>
   </article>
-}
-
-function getOverviewItems(portfolio) {
-  return [
-    { label: 'Daily', value: formatMoney(portfolio.dailyIncome), note: 'projected', color: '#4a91ff', bars: [10, 16, 13, 21, 18, 25, 30, 26] },
-    { label: `${profitWindowDays} Day`, value: formatMoney(portfolio.periodProfit), note: 'profit', color: '#a983ff', bars: [12, 11, 20, 15, 26, 22, 32, 29] },
-    { label: '1 Month', value: formatMoney(portfolio.oneMonthResult), note: 'final result', color: '#1fe1b0', bars: [7, 15, 11, 25, 20, 30, 27, 35] },
-  ]
 }
 
 function getTierProjection(amount, monthlyRate = projectedMonthlyRate) {
@@ -1309,13 +1281,13 @@ function formatCountdown(milliseconds) {
 function parseClientDate(value) {
   if (!value) return null
   const normalized = String(value).includes('T') ? String(value) : String(value).replace(' ', 'T')
-  const date = new Date(normalized.endsWith('Z') ? normalized : `${normalized}Z`)
+  const date = new Date(/(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized) ? normalized : `${normalized}Z`)
   return Number.isNaN(date.getTime()) ? null : date
 }
 
 function isAdminRoute() {
   const path = window.location.pathname.replace(/\/+$/, '').toLowerCase()
-  return path === '/admin' || path.endsWith('/admin')
+  return /\/admin(?:\/index\.html)?$/.test(path)
 }
 
 function getCustomerAppUrl() {
@@ -1327,6 +1299,7 @@ function getCustomerAppUrl() {
 }
 
 async function requestAdminSnapshot(accessKey) {
+  if (window.location.hostname.endsWith('.github.io') || window.location.protocol === 'file:') return requestStaticAdminSnapshot(accessKey)
   let response
   try {
     response = await fetch('/api/admin/summary', {
@@ -1334,14 +1307,14 @@ async function requestAdminSnapshot(accessKey) {
       credentials: 'include',
     })
   } catch {
-    return requestStaticAdminSnapshot(accessKey)
+    throw new Error('Unable to reach the admin service. Please try again.')
   }
 
   const payload = await response.json().catch(() => null)
   if (!response.ok) {
-    if (!payload?.error && response.status === 404) return requestStaticAdminSnapshot(accessKey)
     throw new Error(payload?.error || 'Unable to load server admin data.')
   }
+  if (!payload || !response.headers.get('content-type')?.includes('application/json')) throw new Error('The admin service is unavailable.')
   return normalizeAdminSnapshot(payload, 'Server API', 'server')
 }
 
@@ -1551,15 +1524,15 @@ function toClientPurchase(purchase) {
   const cryptoTone = cryptoOptions.find((option) => option.id === purchase.crypto)?.tone || 'blue'
   const createdAt = purchase.createdAt || new Date().toISOString()
   if (tier) return { ...tier, ...purchase, id: tier.id, level: tier.level, title: tier.title, price: purchase.amount, tone: cryptoTone, createdAt }
-  return { ...purchase, id: purchase.tierId, level: normalizeMainingText(purchase.level), title: normalizeMainingText(purchase.title), price: purchase.amount || 0, monthlyRate: projectedMonthlyRate, color: '#4b91ff', tone: cryptoTone, createdAt }
+  return { ...purchase, id: purchase.tierId, level: normalizeMiningText(purchase.level), title: normalizeMiningText(purchase.title), price: purchase.amount || 0, monthlyRate: projectedMonthlyRate, color: '#4b91ff', tone: cryptoTone, createdAt }
 }
 
 function toClientWallet(wallet) {
   return { id: wallet?.id || '', balance: Number(wallet?.balance) || 0 }
 }
 
-function getRechargeAddress(wallet, crypto, network) {
-  return rechargeAddresses[crypto]?.[network] || `SEZ-${wallet?.id || 'WALLET'}-${crypto}-${network}`
+function getRechargeAddress(crypto, network) {
+  return rechargeAddresses[crypto]?.[network] || ''
 }
 
 function toClientTransaction(transaction) {
@@ -1580,7 +1553,7 @@ function calculateTotalIncome(transactions) {
 
 function toActivity(transaction) {
   const isCredit = ['recharge', 'earning', 'referral_deposit', 'referral_task'].includes(transaction.type)
-  const title = normalizeMainingText(transaction.memo || (transaction.type === 'earning' ? 'Maining daily income' : transaction.type === 'referral_deposit' ? 'Referral deposit commission' : transaction.type === 'referral_task' ? 'Referral task commission' : isCredit ? 'Wallet recharge' : transaction.type === 'purchase' ? 'Plan purchase' : 'Wallet withdrawal'))
+  const title = normalizeMiningText(transaction.memo || (transaction.type === 'earning' ? 'Mining daily income' : transaction.type === 'referral_deposit' ? 'Referral deposit commission' : transaction.type === 'referral_task' ? 'Referral task commission' : isCredit ? 'Wallet recharge' : transaction.type === 'purchase' ? 'Plan purchase' : 'Wallet withdrawal'))
   const details = [transaction.status, transaction.crypto, transaction.network].filter(Boolean).join(' - ')
   return {
     title,
@@ -1592,9 +1565,9 @@ function toActivity(transaction) {
   }
 }
 
-function normalizeMainingText(value) {
+function normalizeMiningText(value) {
   if (!value) return value
-  return String(value || '').replaceAll('Sez VIP', 'Maining Plan').replaceAll('VIP', 'Maining').replaceAll('Tier purchase', 'Plan purchase')
+  return String(value || '').replaceAll('Maining', 'Mining').replaceAll('Sez VIP', 'Mining Plan').replaceAll('VIP', 'Mining').replaceAll('Tier purchase', 'Plan purchase')
 }
 
 function getTransactionTone(type) {
@@ -1648,6 +1621,7 @@ function inferMimeFromName(name) {
 }
 
 async function requestApi(path, options = {}) {
+  if (window.location.hostname.endsWith('.github.io') || window.location.protocol === 'file:') return handleStaticApi(path, options)
   let response
   try {
     response = await fetch(path, {
@@ -1657,14 +1631,14 @@ async function requestApi(path, options = {}) {
       body: options.body ? JSON.stringify(options.body) : undefined,
     })
   } catch {
-    return handleStaticApi(path, options)
+    throw new Error('Unable to reach the server. Please try again in a moment.')
   }
 
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
-    if (!payload.error && (response.status === 404 || response.status === 405)) return handleStaticApi(path, options)
     throw new Error(payload.error || 'Unable to complete this request.')
   }
+  if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('The account service is unavailable. Please try again later.')
   return payload
 }
 
@@ -1772,7 +1746,7 @@ function handleStaticApi(path, options = {}) {
     requireStaticVerifiedAccount(account)
     const tier = tiers.find((item) => item.id === body.tierId)
     const crypto = String(body.crypto || '').toUpperCase()
-    if (!tier) throw new Error('Choose a valid Maining plan.')
+    if (!tier) throw new Error('Choose a valid Mining plan.')
     if (!cryptoOptions.some((option) => option.id === crypto)) throw new Error('Choose a supported cryptocurrency.')
     if ((account.purchases || []).some((purchase) => purchase.tierId === tier.id)) throw new Error('This plan is already in your profile.')
     if (account.wallet.balance < tier.price) throw new Error('Recharge your wallet before buying this plan.')
@@ -1795,7 +1769,7 @@ function handleStaticApi(path, options = {}) {
     if (!['TRC20', 'ERC20', 'BEP20'].includes(network)) throw new Error('Choose a supported network.')
 
     account.wallet.balance = roundStaticMoney((Number(account.wallet.balance) || 0) + amount)
-    account.transactions = [createStaticTransaction('recharge', amount, crypto, network, getRechargeAddress(account.wallet, crypto, network), 'Wallet recharge', 'Credited'), ...(account.transactions || [])]
+    account.transactions = [createStaticTransaction('recharge', amount, crypto, network, getRechargeAddress(crypto, network), 'Wallet recharge', 'Credited'), ...(account.transactions || [])]
     creditStaticReferralCommissions(state, account.id, amount, crypto, 'deposit')
     writeStaticAuthState(state)
     return { recharge: { amount, crypto, network, status: 'Credited' }, wallet: toPublicWallet(account), transactions: account.transactions, totalIncome: calculateTotalIncome(account.transactions) }
@@ -1987,7 +1961,7 @@ function normalizeStaticAccount(account, index, inviteCodes, walletIds) {
 }
 
 function normalizeStaticPurchase(purchase) {
-  return { ...purchase, level: normalizeMainingText(purchase.level), title: normalizeMainingText(purchase.title), createdAt: purchase.createdAt || new Date().toISOString() }
+  return { ...purchase, level: normalizeMiningText(purchase.level), title: normalizeMiningText(purchase.title), createdAt: purchase.createdAt || new Date().toISOString() }
 }
 
 function normalizeStaticTransaction(transaction) {
@@ -2151,9 +2125,10 @@ function requireStaticVerifiedAccount(account) {
 }
 
 function requireStaticAmount(value) {
+  if ((typeof value !== 'number' && typeof value !== 'string') || !/^\d+(?:\.\d{1,2})?$/.test(String(value).trim())) throw new Error('Enter a valid amount with no more than two decimal places.')
   const amount = Number(value)
-  if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter a valid recharge amount.')
-  return amount
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 1000000000) throw new Error('Enter a valid amount.')
+  return Math.round(amount * 100) / 100
 }
 
 function requireStaticText(value, label, minLength, maxLength) {
@@ -2170,6 +2145,7 @@ function requireStaticPassword(value) {
 
 function Icon({ name }) {
   const paths = {
+    calendar: <><rect x="4" y="5" width="16" height="15" rx="2" /><path d="M8 3v4M16 3v4M4 10h16" /></>,
     plus: <><path d="M12 5v14M5 12h14" /></>,
     'arrow-up': <><path d="M12 19V5M6 11l6-6 6 6" /></>,
     'arrow-left': <><path d="M19 12H5M11 18l-6-6 6-6" /></>,

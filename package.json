@@ -10,6 +10,7 @@
     "start": "node server.js",
     "build": "vite build",
     "lint": "oxlint",
+    "test": "node tests/server-regression.mjs && node tests/render-smoke.mjs",
     "preview": "vite preview",
     "predeploy": "npm run build",
     "deploy": "gh-pages -d dist --dotfiles"
