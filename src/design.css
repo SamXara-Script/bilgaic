@@ -144,7 +144,6 @@ h1, h2, h3, .balance-value, .primary-button { font-family: inherit; letter-spaci
 .quick-actions-note, .dashboard-footer, .activity-empty-note { color: #9aa391; }
 .dashboard-welcome .eyebrow, .section-kicker, .side-caption { color: #9aa391; }
 .dashboard-stat-grid .dashboard-stat > strong { overflow-wrap: anywhere; }
-.dashboard-demo { margin: 0 0 22px; }
 .verification-review { grid-column: 1 / -1; width: 100%; margin-top: 16px; }
 .review-panel { padding: 20px; border: 1px solid #d3f97925; border-radius: 10px; background: #172010; }
 .review-documents { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
