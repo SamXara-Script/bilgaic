@@ -249,9 +249,20 @@ const queries = {
       u.email,
       u.verified,
       u.invite_code AS inviteCode,
+      u.registration_invite_code AS registeredWithCode,
+      u.referred_by_user_id AS referredByUserId,
+      COALESCE(
+        (SELECT parent.name FROM users AS parent WHERE parent.id = u.referred_by_user_id),
+        (SELECT invite_owner.name FROM users AS invite_owner WHERE invite_owner.id <> u.id AND invite_owner.invite_code = u.registration_invite_code LIMIT 1)
+      ) AS referredByName,
       u.wallet_id AS walletId,
       u.wallet_balance AS walletBalance,
       u.created_at AS createdAt,
+      (SELECT document_type FROM verification_submissions AS vs WHERE vs.user_id = u.id ORDER BY vs.id DESC LIMIT 1) AS verificationDocumentType,
+      (SELECT document_name FROM verification_submissions AS vs WHERE vs.user_id = u.id ORDER BY vs.id DESC LIMIT 1) AS documentName,
+      (SELECT face_name FROM verification_submissions AS vs WHERE vs.user_id = u.id ORDER BY vs.id DESC LIMIT 1) AS faceName,
+      (SELECT status FROM verification_submissions AS vs WHERE vs.user_id = u.id ORDER BY vs.id DESC LIMIT 1) AS verificationStatus,
+      (SELECT MAX(created_at) FROM verification_submissions AS vs WHERE vs.user_id = u.id) AS lastVerificationAt,
       (SELECT COUNT(*) FROM purchases AS p WHERE p.user_id = u.id) AS purchasesCount,
       (
         SELECT COUNT(*)
@@ -619,6 +630,9 @@ function toAdminUser(record) {
     email: record.email,
     verified: Boolean(record.verified),
     inviteCode: record.inviteCode,
+    registeredWithCode: record.registeredWithCode,
+    referredByUserId: record.referredByUserId,
+    referredByName: record.referredByName,
     walletId: record.walletId,
     walletBalance: Number(record.walletBalance) || 0,
     purchasesCount: Number(record.purchasesCount) || 0,
@@ -628,8 +642,12 @@ function toAdminUser(record) {
     totalIncome: Number(record.totalIncome) || 0,
     totalRecharged: Number(record.totalRecharged) || 0,
     totalWithdrawn: Number(record.totalWithdrawn) || 0,
+    verificationStatus: record.verificationStatus || (record.verified ? 'Verified' : 'Required'),
+    verificationDocumentType: record.verificationDocumentType,
+    documentName: record.documentName,
+    faceName: record.faceName,
     createdAt: record.createdAt,
-    lastActivity: latestDateValue(record.lastTransactionAt, record.lastPurchaseAt, record.createdAt),
+    lastActivity: latestDateValue(record.lastTransactionAt, record.lastPurchaseAt, record.lastVerificationAt, record.createdAt),
   }
 }
 

@@ -1211,12 +1211,28 @@ function EmptyAdminState({ label }) {
 }
 
 function AdminUserRow({ user }) {
+  const registeredBy = user.referredByName || user.registeredWithCode || (user.referredByUserId ? `User #${user.referredByUserId}` : 'Direct')
+  const verificationStatus = user.verificationStatus || (user.verified ? 'Verified' : 'Required')
+
   return <article className="admin-user-row">
-    <div className="admin-user-main"><span>{String(user.name || 'A').slice(0, 1).toUpperCase()}</span><div><h3>{user.name}</h3><p>{user.email}</p><small>{user.inviteCode || 'No invite code'}</small></div></div>
+    <div className="admin-user-main"><span>{String(user.name || 'A').slice(0, 1).toUpperCase()}</span><div><h3>{user.name || 'Customer'}</h3><p>Gmail: {user.email || 'Not saved'}</p><small>Wallet ID: {user.walletId || 'Not assigned'}</small></div></div>
     <div className="admin-user-numbers">
       <span><strong>{formatMoney(user.walletBalance)}</strong><small>Wallet</small></span>
       <span><strong>{user.purchasesCount}</strong><small>Plans</small></span>
       <span><strong>{user.referralCount}</strong><small>Referrals</small></span>
+      <span><strong>{formatMoney(user.totalIncome)}</strong><small>Total Income</small></span>
+      <span><strong>{formatMoney(user.totalRecharged)}</strong><small>Recharged</small></span>
+      <span><strong>{formatMoney(user.totalWithdrawn)}</strong><small>Withdrawn</small></span>
+    </div>
+    <div className="admin-user-details">
+      <span><strong>Invite</strong><small>{user.inviteCode || 'No invite code'}</small></span>
+      <span><strong>Registered By</strong><small>{registeredBy}</small></span>
+      <span><strong>Transactions</strong><small>{user.transactionsCount || 0} total</small></span>
+      <span><strong>Pending Withdraw</strong><small>{user.pendingWithdrawals || 0}</small></span>
+      <span><strong>Verification</strong><small>{verificationStatus}</small></span>
+      <span><strong>Document</strong><small>{user.documentName || user.verificationDocumentType || 'Not uploaded'}</small></span>
+      <span><strong>Face Photo</strong><small>{user.faceName || 'Not uploaded'}</small></span>
+      <span><strong>Joined</strong><small>{formatShortDate(user.createdAt)}</small></span>
     </div>
     <div className="admin-user-state"><strong className={user.verified ? 'verified' : ''}>{user.verified ? 'Verified' : 'Unverified'}</strong><small>{formatShortDate(user.lastActivity || user.createdAt)}</small></div>
   </article>
@@ -1224,9 +1240,12 @@ function AdminUserRow({ user }) {
 
 function AdminTransactionRow({ transaction }) {
   const isCredit = ['recharge', 'earning', 'referral_deposit', 'referral_task'].includes(transaction.type)
+  const details = [transaction.userEmail, transaction.status, transaction.crypto, transaction.network].filter(Boolean).join(' / ') || 'Wallet activity'
+  const memo = transaction.memo || transaction.note || transaction.address || formatShortDateTime(transaction.createdAt)
+
   return <article className="admin-transaction-row">
     <span className={`activity-icon ${getTransactionTone(transaction.type)}`}><Icon name={isCredit ? 'plus' : 'arrow-up'} /></span>
-    <div><h3>{formatAdminType(transaction.type)}</h3><p>{transaction.userName || 'Customer'} - {[transaction.status, transaction.crypto, transaction.network].filter(Boolean).join(' / ') || 'Wallet activity'}</p></div>
+    <div><h3>{formatAdminType(transaction.type)}</h3><p>{transaction.userName || 'Customer'} - {details}</p><small>{memo}</small></div>
     <strong className={isCredit ? 'positive' : 'negative'}>{isCredit ? '+' : '-'}{formatMoney(transaction.amount)}</strong>
   </article>
 }
@@ -1324,13 +1343,108 @@ async function requestAdminSnapshot(accessKey) {
 async function requestStaticAdminSnapshot(accessKey) {
   if (!globalThis.crypto?.subtle || typeof TextEncoder === 'undefined') throw new Error('Admin login requires the backend server with ADMIN_ACCESS_KEY configured.')
   if (!await isStaticAdminTestAccessKey(accessKey)) throw new Error('Admin access key is invalid.')
-  return createEmptyAdminSnapshot('GitHub Pages test mode', 'static')
+  return createStaticAdminSnapshot(readStaticAuthState())
 }
 
 async function isStaticAdminTestAccessKey(accessKey) {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(accessKey))
   const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
   return hash === staticAdminTestAccessKeyHash
+}
+
+function createStaticAdminSnapshot(state) {
+  const users = (state.users || []).map((account) => {
+    const transactions = account.transactions || []
+    const purchases = account.purchases || []
+    const directParent = getStaticReferralParent(state, account)
+
+    return {
+      id: account.id,
+      name: account.name,
+      email: account.email,
+      verified: Boolean(account.verified),
+      inviteCode: account.inviteCode,
+      registeredWithCode: account.registeredWithCode,
+      referredByUserId: account.referredByUserId,
+      referredByName: directParent?.name || '',
+      walletId: account.wallet?.id || '',
+      walletBalance: Number(account.wallet?.balance) || 0,
+      purchasesCount: purchases.length,
+      referralCount: getStaticReferrals(state, account.id).length,
+      transactionsCount: transactions.length,
+      pendingWithdrawals: countStaticTransactions(transactions, 'withdrawal', 'pending'),
+      totalIncome: calculateTotalIncome(transactions),
+      totalRecharged: sumStaticTransactions(transactions, 'recharge'),
+      totalWithdrawn: sumStaticTransactions(transactions, 'withdrawal'),
+      verificationStatus: account.verification?.status || (account.verified ? 'Verified' : 'Required'),
+      verificationDocumentType: account.verification?.documentType || '',
+      documentName: account.verification?.documentName || '',
+      faceName: account.verification?.faceName || '',
+      createdAt: account.createdAt,
+      lastActivity: latestClientDateValue(
+        account.createdAt,
+        account.verification?.createdAt,
+        ...purchases.map((purchase) => purchase.createdAt),
+        ...transactions.map((transaction) => transaction.createdAt),
+      ),
+    }
+  })
+  const transactions = (state.users || []).flatMap((account) => (account.transactions || []).map((transaction, index) => ({
+    ...transaction,
+    id: `${account.id}-${transaction.createdAt || index}-${transaction.type || 'transaction'}-${index}`,
+    userId: account.id,
+    userName: account.name,
+    userEmail: account.email,
+    amount: Number(transaction.amount) || 0,
+  }))).sort((first, second) => compareClientDatesDesc(first.createdAt, second.createdAt)).slice(0, 80)
+
+  return normalizeAdminSnapshot({
+    sourceLabel: 'GitHub Pages test mode',
+    sourceType: 'static',
+    generatedAt: new Date().toISOString(),
+    users,
+    transactions,
+  }, 'GitHub Pages test mode', 'static')
+}
+
+function getStaticReferralParent(state, account) {
+  if (!account) return null
+  if (account.referredByUserId) {
+    const parent = state.users.find((item) => item.id === account.referredByUserId)
+    if (parent) return parent
+  }
+
+  const registeredWithCode = normalizeStaticInviteCode(account.registeredWithCode)
+  return registeredWithCode ? state.users.find((item) => item.id !== account.id && normalizeStaticInviteCode(item.inviteCode) === registeredWithCode) || null : null
+}
+
+function countStaticTransactions(transactions, type, status) {
+  const normalizedStatus = String(status || '').toLowerCase()
+  return (transactions || []).filter((transaction) => {
+    const matchesType = !type || transaction.type === type
+    const matchesStatus = !normalizedStatus || String(transaction.status || '').toLowerCase() === normalizedStatus
+    return matchesType && matchesStatus
+  }).length
+}
+
+function sumStaticTransactions(transactions, type) {
+  return roundClientMoney((transactions || []).reduce((total, transaction) => {
+    return transaction.type === type ? total + (Number(transaction.amount) || 0) : total
+  }, 0))
+}
+
+function latestClientDateValue(...values) {
+  const timestamps = values.filter(Boolean).map((value) => {
+    const date = parseClientDate(value)
+    return date ? date.getTime() : Number.NaN
+  }).filter((value) => Number.isFinite(value))
+  return timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : null
+}
+
+function compareClientDatesDesc(first, second) {
+  const firstDate = parseClientDate(first)
+  const secondDate = parseClientDate(second)
+  return (secondDate?.getTime() || 0) - (firstDate?.getTime() || 0)
 }
 
 function normalizeAdminSnapshot(snapshot, sourceLabel, sourceType) {
