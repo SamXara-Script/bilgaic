@@ -119,6 +119,7 @@ const documentUploadTypes = ['application/pdf', 'image/jpeg', 'image/png', 'imag
 const faceUploadTypes = ['image/jpeg', 'image/png', 'image/webp']
 const supportChangeMessage = 'Contact support to change customer name or Gmail.'
 const staticAdminTestAccessKeyHash = 'f9e1a7f30eb12efc8c3984a68d0d85be22133982f0a3c4c7f77ace1338d517f3'
+const staticInviteCodePattern = /^SEZ[A-Z0-9]{6}$/
 const walletHistoryFilters = [
   { id: 'recharge', label: 'Recharge History', emptyMessage: 'No recharge history yet' },
   { id: 'withdrawal', label: 'Withdraw History', emptyMessage: 'No withdraw history yet' },
@@ -1992,7 +1993,7 @@ function requireStaticInviteCode(value, state) {
   if (!inviteCode) throw new Error('Invite code is required to create an account.')
   const inviter = state.users.find((account) => account.inviteCode === inviteCode)
   if (inviter) return { inviteCode, inviterId: inviter.id }
-  if (inviteCode === defaultInviteCode && state.users.length === 0) return { inviteCode, inviterId: null }
+  if (inviteCode === defaultInviteCode || staticInviteCodePattern.test(inviteCode)) return { inviteCode, inviterId: null }
   throw new Error('Invite code is invalid.')
 }
 
